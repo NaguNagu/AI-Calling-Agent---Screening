@@ -21,6 +21,9 @@ Deno.serve(async (request) => {
 
   const { to_number: toNumber, candidate_id: candidateId } = await request.json()
   if (!toNumber) return json({ error: 'to_number is required' }, 400)
+  const digits = String(toNumber).replace(/[^0-9]/g, '')
+  const normalizedNumber = digits.length === 10 ? `+91${digits}` : String(toNumber).trim()
+  if (!/^\+91[6-9]\d{9}$/.test(normalizedNumber)) return json({ error: 'Please use a valid Indian mobile number' }, 400)
 
   const authId = Deno.env.get('PLIVO_AUTH_ID')
   const authToken = Deno.env.get('PLIVO_AUTH_TOKEN')
@@ -28,7 +31,7 @@ Deno.serve(async (request) => {
   if (!authId || !authToken || !fromNumber) return json({ error: 'Plivo secrets are not configured' }, 500)
 
   const answerUrl = `${supabaseUrl}/functions/v1/plivo-answer${candidateId ? `?candidate_id=${encodeURIComponent(candidateId)}` : ''}`
-  const form = new URLSearchParams({ from: fromNumber, to: String(toNumber), answer_url: answerUrl, answer_method: 'POST' })
+  const form = new URLSearchParams({ from: fromNumber, to: normalizedNumber, answer_url: answerUrl, answer_method: 'POST' })
   const plivoResponse = await fetch(`https://api.plivo.com/v1/Account/${authId}/Call/`, {
     method: 'POST',
     headers: { Authorization: `Basic ${btoa(`${authId}:${authToken}`)}`, 'Content-Type': 'application/x-www-form-urlencoded' },
