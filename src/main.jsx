@@ -32,9 +32,31 @@ function App() {
   const [notice, setNotice] = useState('')
   const [connectionState, setConnectionState] = useState(isSupabaseConfigured ? 'checking' : 'missing')
   const [campaignList, setCampaignList] = useState(campaigns)
+  const [session, setSession] = useState(null)
+  const [authLoading, setAuthLoading] = useState(Boolean(supabase))
+  const [loginEmail, setLoginEmail] = useState('')
+  const [loginPassword, setLoginPassword] = useState('')
+  const [loginError, setLoginError] = useState('')
+
+  const signIn = async (event) => {
+    event.preventDefault()
+    setLoginError('')
+    const { error } = await supabase.auth.signInWithPassword({ email: loginEmail, password: loginPassword })
+    if (error) setLoginError(error.message)
+  }
 
   useEffect(() => {
     if (!supabase) return
+    supabase.auth.getSession().then(({ data }) => {
+      setSession(data.session)
+      setAuthLoading(false)
+    })
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, nextSession) => setSession(nextSession))
+    return () => listener.subscription.unsubscribe()
+  }, [])
+
+  useEffect(() => {
+    if (!supabase || !session) return
     supabase.from('campaigns').select('id, name, status, created_at').order('created_at', { ascending: false })
       .then(({ data, error }) => {
         if (error) {
@@ -44,7 +66,7 @@ function App() {
         setConnectionState('connected')
         if (data?.length) setCampaignList(data.map(item => ({ name: item.name, location: 'New campaign', candidates: 0, completed: 0, review: 0, status: item.status === 'active' ? 'Active' : 'Draft', minutes: '0m', tone: 'blue' })))
       })
-  }, [])
+  }, [session])
 
   const createCampaign = async (event) => {
     event.preventDefault()
@@ -90,6 +112,9 @@ function App() {
     reader.readAsText(file)
   }
 
+  if (supabase && authLoading) return <div className="auth-loading">Opening your secure workspace…</div>
+  if (supabase && !session) return <LoginScreen email={loginEmail} setEmail={setLoginEmail} password={loginPassword} setPassword={setLoginPassword} error={loginError} onSubmit={signIn} />
+
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -130,5 +155,6 @@ function App() {
 function Metric({ label, value, detail, icon, accent, progress }) { return <div className="metric-card"><div className={`metric-icon ${accent}`}>{icon}</div><div className="metric-copy"><span>{label}</span><strong>{value}</strong><small className={accent === 'red' ? 'red-text' : ''}>{detail}</small></div>{progress && <div className="mini-progress"><div style={{ width: `${progress}%` }} /></div>}</div> }
 function CampaignCard({ campaign }) { const pct = Math.round(campaign.completed / campaign.candidates * 100); return <div className="campaign-card"><div className="campaign-top"><div className={`campaign-icon ${campaign.tone}`}>⌁</div><span className={`status-pill ${campaign.status === 'Active' ? 'active' : 'completed'}`}><i />{campaign.status}</span></div><h3>{campaign.name}</h3><p className="muted">{campaign.location}</p><div className="campaign-stats"><div><b>{campaign.candidates}</b><span>Candidates</span></div><div><b>{campaign.completed}</b><span>Screened</span></div><div><b>{campaign.review}</b><span>Review</span></div></div><div className="card-progress"><div className="progress-track"><div style={{ width: `${pct}%` }} /></div><span>{pct}% complete</span><span className="campaign-minutes">◷ {campaign.minutes}</span></div></div> }
 function Status({ label }) { const cls = label.toLowerCase().replaceAll(' ', '-'); return <span className={`result-status ${cls}`}><i />{label}</span> }
+function LoginScreen({ email, setEmail, password, setPassword, error, onSubmit }) { return <main className="login-page"><div className="login-card"><div className="brand login-brand"><div className="brand-mark">V</div><div><div className="brand-name">vaani</div><div className="brand-sub">AI screening studio</div></div></div><div className="login-kicker">PRIVATE WORKSPACE</div><h1>Welcome back</h1><p className="muted">Sign in to manage your candidate screening campaigns.</p><form onSubmit={onSubmit} className="login-form"><label>Email address<input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@company.com" required /></label><label>Password<input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Your password" required /></label>{error && <div className="login-error">{error}</div>}<button className="primary-button" type="submit">Sign in <span>→</span></button></form><p className="login-note">Your account is managed through Supabase Auth.</p></div></main> }
 
 createRoot(document.getElementById('root')).render(<StrictMode><App /></StrictMode>)
