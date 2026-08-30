@@ -22,6 +22,13 @@ function App() {
   const [active, setActive] = useState('Overview')
   const [showCampaign, setShowCampaign] = useState(false)
   const [campaignName, setCampaignName] = useState('')
+  const [jdText, setJdText] = useState('')
+  const [companyName, setCompanyName] = useState('')
+  const [companyDisclosure, setCompanyDisclosure] = useState('if_asked')
+  const [questionText, setQuestionText] = useState('')
+  const [candidateName, setCandidateName] = useState('')
+  const [candidatePhone, setCandidatePhone] = useState('')
+  const [candidateCsv, setCandidateCsv] = useState([])
   const [notice, setNotice] = useState('')
   const [connectionState, setConnectionState] = useState(isSupabaseConfigured ? 'checking' : 'missing')
   const [campaignList, setCampaignList] = useState(campaigns)
@@ -43,17 +50,44 @@ function App() {
     event.preventDefault()
     if (!campaignName.trim()) return
     if (supabase) {
-      const { data, error } = await supabase.from('campaigns').insert({ name: campaignName.trim(), status: 'draft' }).select('id, name, status').single()
+      const { data, error } = await supabase.from('campaigns').insert({ name: campaignName.trim(), jd_text: jdText.trim(), company_name: companyName.trim() || null, company_disclosure: companyDisclosure, status: 'draft' }).select('id, name, status').single()
       if (error) {
         setNotice(`Could not save campaign: ${error.message}`)
         return
       }
+      const manualCandidate = candidateName.trim() && candidatePhone.trim() ? [{ campaign_id: data.id, full_name: candidateName.trim(), mobile_number: candidatePhone.trim() }] : []
+      const importedCandidates = [...manualCandidate, ...candidateCsv.map(candidate => ({ ...candidate, campaign_id: data.id }))]
+      if (importedCandidates.length) await supabase.from('candidates').insert(importedCandidates)
+      const questions = questionText.split('\n').map((question, index) => question.trim() ? ({ campaign_id: data.id, question_text: question.trim(), sort_order: index, required: false }) : null).filter(Boolean)
+      if (questions.length) await supabase.from('screening_questions').insert(questions)
       setCampaignList(current => [{ name: data.name, location: 'New campaign', candidates: 0, completed: 0, review: 0, status: 'Draft', minutes: '0m', tone: 'blue' }, ...current])
     }
     setShowCampaign(false)
     setNotice(`Campaign “${campaignName}” is ready for candidates.`)
     setCampaignName('')
+    setJdText('')
+    setCompanyName('')
+    setQuestionText('')
+    setCandidateName('')
+    setCandidatePhone('')
+    setCandidateCsv([])
     setTimeout(() => setNotice(''), 3500)
+  }
+
+  const readCandidateCsv = (event) => {
+    const file = event.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = () => {
+      const lines = String(reader.result).split(/\r?\n/).map(line => line.trim()).filter(Boolean)
+      if (lines.length < 2) return
+      const headers = lines[0].split(',').map(header => header.trim().toLowerCase().replaceAll(' ', '_'))
+      const nameIndex = headers.indexOf('full_name') >= 0 ? headers.indexOf('full_name') : headers.indexOf('name')
+      const phoneIndex = headers.indexOf('mobile_number') >= 0 ? headers.indexOf('mobile_number') : headers.indexOf('mobile')
+      if (nameIndex < 0 || phoneIndex < 0) return
+      setCandidateCsv(lines.slice(1).map(line => line.split(',')).map(values => ({ full_name: values[nameIndex]?.trim(), mobile_number: values[phoneIndex]?.trim() })).filter(candidate => candidate.full_name && candidate.mobile_number))
+    }
+    reader.readAsText(file)
   }
 
   return (
@@ -88,7 +122,7 @@ function App() {
         </div>
       </main>
 
-      {showCampaign && <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && setShowCampaign(false)}><div className="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title"><button className="modal-close" onClick={() => setShowCampaign(false)}>×</button><div className="modal-kicker">STEP 1 OF 4</div><h2 id="modal-title">Create a campaign</h2><p className="muted">Start with the job requirement. You can add candidates and screening questions next.</p><form onSubmit={createCampaign}><label>Campaign name <span>Required</span><input autoFocus value={campaignName} onChange={e => setCampaignName(e.target.value)} placeholder="e.g. Senior Sales Executive" /></label><label>Job description / requirement<textarea placeholder="Paste the requirement here or upload a document later." rows="4" /></label><div className="modal-actions"><button type="button" className="outline-button" onClick={() => setShowCampaign(false)}>Cancel</button><button className="primary-button" type="submit">Continue <span>→</span></button></div></form></div></div>}
+      {showCampaign && <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && setShowCampaign(false)}><div className="modal modal-wide" role="dialog" aria-modal="true" aria-labelledby="modal-title"><button className="modal-close" onClick={() => setShowCampaign(false)}>×</button><div className="modal-kicker">CAMPAIGN SETUP</div><h2 id="modal-title">Create a campaign</h2><p className="muted">Set up the job, questions, and candidates before making calls.</p><form onSubmit={createCampaign}><div className="form-grid"><label>Campaign name <span>Required · becomes the job name</span><input autoFocus value={campaignName} onChange={e => setCampaignName(e.target.value)} placeholder="e.g. Senior Sales Executive" /></label><label>Company name<input value={companyName} onChange={e => setCompanyName(e.target.value)} placeholder="Your company or consultancy" /></label></div><label>Job description / requirement<textarea value={jdText} onChange={e => setJdText(e.target.value)} placeholder="Paste the requirement here." rows="3" /></label><label>Company name disclosure<select value={companyDisclosure} onChange={e => setCompanyDisclosure(e.target.value)}><option value="if_asked">Reveal only if candidate asks</option><option value="always">Always reveal</option><option value="never">Do not reveal</option></select></label><label>Screening questions <span>One question per line</span><textarea value={questionText} onChange={e => setQuestionText(e.target.value)} placeholder="What is your relevant experience?\nWhy are you considering a job change?" rows="3" /></label><div className="candidate-entry"><div><b>Add candidates</b><small>Use a CSV or add one candidate manually.</small></div><div className="form-grid"><label>Full name<input value={candidateName} onChange={e => setCandidateName(e.target.value)} placeholder="Candidate name" /></label><label>Mobile number<input value={candidatePhone} onChange={e => setCandidatePhone(e.target.value)} placeholder="+91 98765 43210" /></label></div><label className="file-label">Upload CSV<input type="file" accept=".csv,text/csv" onChange={readCandidateCsv} /><small>{candidateCsv.length ? `${candidateCsv.length} candidate(s) ready to import` : 'Required columns: full_name, mobile_number'}</small></label></div><div className="modal-actions"><button type="button" className="outline-button" onClick={() => setShowCampaign(false)}>Cancel</button><button className="primary-button" type="submit">Save campaign <span>→</span></button></div></form></div></div>}
     </div>
   )
 }
