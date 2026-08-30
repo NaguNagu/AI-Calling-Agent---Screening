@@ -1,6 +1,7 @@
-import { StrictMode, useState } from 'react'
+import { StrictMode, useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import './styles.css'
+import { isSupabaseConfigured, supabase } from './lib/supabase'
 
 const campaigns = [
   { name: 'Senior Sales Executive', location: 'Chennai · F2F', candidates: 84, completed: 56, review: 12, status: 'Active', minutes: '248m', tone: 'blue' },
@@ -22,10 +23,33 @@ function App() {
   const [showCampaign, setShowCampaign] = useState(false)
   const [campaignName, setCampaignName] = useState('')
   const [notice, setNotice] = useState('')
+  const [connectionState, setConnectionState] = useState(isSupabaseConfigured ? 'checking' : 'missing')
+  const [campaignList, setCampaignList] = useState(campaigns)
 
-  const createCampaign = (event) => {
+  useEffect(() => {
+    if (!supabase) return
+    supabase.from('campaigns').select('id, name, status, created_at').order('created_at', { ascending: false })
+      .then(({ data, error }) => {
+        if (error) {
+          setConnectionState('error')
+          return
+        }
+        setConnectionState('connected')
+        if (data?.length) setCampaignList(data.map(item => ({ name: item.name, location: 'New campaign', candidates: 0, completed: 0, review: 0, status: item.status === 'active' ? 'Active' : 'Draft', minutes: '0m', tone: 'blue' })))
+      })
+  }, [])
+
+  const createCampaign = async (event) => {
     event.preventDefault()
     if (!campaignName.trim()) return
+    if (supabase) {
+      const { data, error } = await supabase.from('campaigns').insert({ name: campaignName.trim(), status: 'draft' }).select('id, name, status').single()
+      if (error) {
+        setNotice(`Could not save campaign: ${error.message}`)
+        return
+      }
+      setCampaignList(current => [{ name: data.name, location: 'New campaign', candidates: 0, completed: 0, review: 0, status: 'Draft', minutes: '0m', tone: 'blue' }, ...current])
+    }
     setShowCampaign(false)
     setNotice(`Campaign “${campaignName}” is ready for candidates.`)
     setCampaignName('')
@@ -45,7 +69,7 @@ function App() {
       </aside>
 
       <main className="main-content">
-        <header className="topbar"><div className="breadcrumb">Workspace <span>/</span> {active}</div><div className="top-actions"><button className="icon-button" aria-label="Notifications">♢<span className="notification-dot" /></button><div className="avatar">NS</div></div></header>
+        <header className="topbar"><div className="breadcrumb">Workspace <span>/</span> {active}</div><div className="top-actions"><span className={`connection-badge ${connectionState}`}><i />{connectionState === 'connected' ? 'Supabase connected' : connectionState === 'checking' ? 'Connecting…' : 'Demo mode'}</span><button className="icon-button" aria-label="Notifications">♢<span className="notification-dot" /></button><div className="avatar">NS</div></div></header>
         <div className="content-wrap">
           {notice && <div className="toast"><span>✓</span>{notice}</div>}
           <div className="page-heading"><div><p className="eyebrow">SUNDAY, AUGUST 30, 2026</p><h1>Good afternoon, Nagesh <span className="wave">✦</span></h1><p className="muted">Here’s what’s happening with your candidate screening today.</p></div><button className="primary-button" onClick={() => setShowCampaign(true)}><span>＋</span> New campaign</button></div>
@@ -58,7 +82,7 @@ function App() {
           </section>
 
           <div className="section-heading"><div><h2>Campaigns</h2><p className="muted">Monitor your active screening campaigns.</p></div><button className="text-button" onClick={() => setActive('Campaigns')}>View all <span>→</span></button></div>
-          <section className="campaign-grid">{campaigns.map(campaign => <CampaignCard key={campaign.name} campaign={campaign} />)}<button className="new-card" onClick={() => setShowCampaign(true)}><div className="new-card-icon">＋</div><b>Create a campaign</b><span>Upload a JD and start screening</span></button></section>
+          <section className="campaign-grid">{campaignList.map(campaign => <CampaignCard key={campaign.name} campaign={campaign} />)}<button className="new-card" onClick={() => setShowCampaign(true)}><div className="new-card-icon">＋</div><b>Create a campaign</b><span>Upload a JD and start screening</span></button></section>
 
           <section className="lower-grid"><div className="panel"><div className="panel-heading"><div><h2>Recent candidate activity</h2><p className="muted">The latest screening results from your team.</p></div><button className="filter-button">All campaigns　⌄</button></div><div className="table-wrap"><table><thead><tr><th>CANDIDATE</th><th>CAMPAIGN</th><th>LANGUAGE</th><th>STATUS</th><th>SCREENED</th><th>SCORE</th></tr></thead><tbody>{candidates.map(candidate => <tr key={candidate.name}><td><div className="candidate-cell"><div className={`avatar ${candidate.color}`}>{candidate.initials}</div><div><b>{candidate.name}</b><small>{candidate.role}</small></div></div></td><td className="role-cell">{candidate.role}</td><td><span className="language"><span className="language-dot" />{candidate.lang}</span></td><td><Status label={candidate.status} /></td><td className="date-cell">{candidate.date}<small>{candidate.duration}</small></td><td>{candidate.score ? <div className="score"><b>{candidate.score}</b><span>/100</span></div> : <span className="dash">—</span>}</td></tr>)}</tbody></table></div></div><div className="panel usage-panel"><div className="panel-heading"><div><h2>Usage this month</h2><p className="muted">Your current plan allowance.</p></div><button className="more-button">•••</button></div><div className="usage-total"><strong>468</strong><span>minutes used</span></div><div className="usage-progress"><div style={{ width: '47%' }} /></div><div className="usage-labels"><span>0 min</span><span>1,000 min</span></div><div className="usage-breakdown"><div><span className="legend-dot teal-dot" /><span>Completed calls</span><b>382 min</b></div><div><span className="legend-dot light-dot" /><span>Other / failed</span><b>86 min</b></div></div><button className="outline-button" onClick={() => setActive('Usage')}>Open usage report <span>→</span></button></div></section>
         </div>
