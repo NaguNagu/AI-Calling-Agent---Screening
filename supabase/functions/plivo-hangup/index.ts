@@ -33,6 +33,19 @@ Deno.serve(async (request) => {
   const candidateResponse = await fetch(`${supabaseUrl}/rest/v1/candidates?id=eq.${encodeURIComponent(call.candidate_id)}&select=campaign_id,preferred_language`, { headers })
   const candidateRows = await candidateResponse.json()
   const candidate = candidateRows?.[0]
+  const candidateStatus = callStatus === 'completed' ? 'completed' : callStatus === 'busy' ? 'no_answer' : callStatus
+  if (candidate) await fetch(`${supabaseUrl}/rest/v1/candidates?id=eq.${encodeURIComponent(call.candidate_id)}`, { method: 'PATCH', headers, body: JSON.stringify({ status: candidateStatus }) })
   await fetch(`${supabaseUrl}/rest/v1/usage_events?on_conflict=call_id`, { method: 'POST', headers: { ...headers, Prefer: 'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify({ call_id: callId, campaign_id: candidate?.campaign_id || null, provider: 'plivo', minutes: Math.ceil(duration / 60 * 100) / 100, estimated_cost: null }) })
+
+  if (candidate?.campaign_id) {
+    const campaignCandidatesResponse = await fetch(`${supabaseUrl}/rest/v1/candidates?campaign_id=eq.${encodeURIComponent(candidate.campaign_id)}&select=status`, { headers })
+    const campaignCandidates = await campaignCandidatesResponse.json()
+    const terminalStatuses = ['completed', 'no_answer', 'failed', 'shortlisted', 'rejected', 'contact_later']
+    const allFinished = campaignCandidates.length > 0 && campaignCandidates.every((item: { status: string }) => terminalStatuses.includes(item.status))
+    if (allFinished) {
+      const anyCompleted = campaignCandidates.some((item: { status: string }) => ['completed', 'shortlisted'].includes(item.status))
+      await fetch(`${supabaseUrl}/rest/v1/campaigns?id=eq.${encodeURIComponent(candidate.campaign_id)}`, { method: 'PATCH', headers, body: JSON.stringify({ status: anyCompleted ? 'completed' : 'error' }) })
+    }
+  }
   return json({ ok: true })
 })
