@@ -24,7 +24,7 @@ create table if not exists public.campaigns (
 
 create table if not exists public.candidates (
   id uuid primary key default gen_random_uuid(),
-  campaign_id uuid not null references public.campaigns(id) on delete cascade,
+  campaign_id uuid references public.campaigns(id) on delete set null,
   full_name text not null,
   mobile_number text not null,
   status text not null default 'not_contacted' check (status in ('not_contacted', 'scheduled', 'calling', 'completed', 'no_answer', 'failed', 'screening_incomplete', 'under_review', 'shortlisted', 'rejected', 'contact_later')),
@@ -40,6 +40,9 @@ create table if not exists public.candidates (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+-- Allow individual contacts that are not assigned to a campaign.
+alter table public.candidates alter column campaign_id drop not null;
 
 create table if not exists public.screening_questions (
   id uuid primary key default gen_random_uuid(),
