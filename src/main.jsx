@@ -131,7 +131,7 @@ function App() {
         <header className="topbar"><div className="breadcrumb">Workspace <span>/</span> {active}</div><div className="top-actions"><span className={`connection-badge ${connectionState}`}><i />{connectionState === 'connected' ? 'Supabase connected' : connectionState === 'checking' ? 'Connecting…' : 'Demo mode'}</span><button className="icon-button" aria-label="Notifications">♢<span className="notification-dot" /></button><div className="avatar">NS</div></div></header>
         <div className="content-wrap">
           {notice && <div className="toast"><span>✓</span>{notice}</div>}
-          <div className="page-heading"><div><p className="eyebrow">SUNDAY, AUGUST 30, 2026</p><h1>Good afternoon, Nagesh <span className="wave">✦</span></h1><p className="muted">Here’s what’s happening with your candidate screening today.</p></div><button className="primary-button" onClick={() => setShowCampaign(true)}><span>＋</span> New campaign</button></div>
+          <div className="page-heading"><div><p className="eyebrow">SUNDAY, AUGUST 30, 2026</p><h1>Good afternoon, Nagesh <span className="wave">✦</span></h1><p className="muted">Here’s what’s happening with your candidate screening today.</p></div>{active !== 'Candidates' && <button className="primary-button" onClick={() => setShowCampaign(true)}><span>＋</span> New campaign</button>}</div>
 
           {active === 'Overview' ? <>
           <section className="metric-grid" aria-label="Screening overview">
