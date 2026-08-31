@@ -4,9 +4,9 @@ import './styles.css'
 import { isSupabaseConfigured, supabase } from './lib/supabase'
 
 const campaigns = [
-  { name: 'Senior Sales Executive', location: 'Chennai · F2F', candidates: 84, completed: 56, review: 12, status: 'Active', minutes: '248m', tone: 'blue' },
-  { name: 'Customer Support Associate', location: 'Bengaluru · Virtual', candidates: 42, completed: 42, review: 7, status: 'Completed', minutes: '171m', tone: 'violet' },
-  { name: 'Warehouse Supervisor', location: 'Coimbatore · F2F', candidates: 27, completed: 11, review: 3, status: 'Active', minutes: '49m', tone: 'amber' },
+  { name: 'Senior Sales Executive', location: 'Chennai · F2F', candidates: 84, completed: 56, review: 12, status: 'Active', minutes: '248m', tone: 'blue', primary_language: 'Tamil' },
+  { name: 'Customer Support Associate', location: 'Bengaluru · Virtual', candidates: 42, completed: 42, review: 7, status: 'Completed', minutes: '171m', tone: 'violet', primary_language: 'Hindi' },
+  { name: 'Warehouse Supervisor', location: 'Coimbatore · F2F', candidates: 27, completed: 11, review: 3, status: 'Active', minutes: '49m', tone: 'amber', primary_language: 'English' },
 ]
 
 const candidates = [
@@ -22,6 +22,7 @@ function App() {
   const [active, setActive] = useState('Overview')
   const [showCampaign, setShowCampaign] = useState(false)
   const [campaignName, setCampaignName] = useState('')
+  const [primaryLanguage, setPrimaryLanguage] = useState('English')
   const [jdText, setJdText] = useState('')
   const [companyName, setCompanyName] = useState('')
   const [companyDisclosure, setCompanyDisclosure] = useState('if_asked')
@@ -57,14 +58,14 @@ function App() {
 
   useEffect(() => {
     if (!supabase || !session) return
-    supabase.from('campaigns').select('id, name, status, created_at').order('created_at', { ascending: false })
+    supabase.from('campaigns').select('id, name, status, primary_language, created_at').order('created_at', { ascending: false })
       .then(({ data, error }) => {
         if (error) {
           setConnectionState('error')
           return
         }
         setConnectionState('connected')
-        if (data?.length) setCampaignList(data.map(item => ({ name: item.name, location: 'New campaign', candidates: 0, completed: 0, review: 0, status: item.status === 'active' ? 'Active' : 'Draft', minutes: '0m', tone: 'blue' })))
+        if (data?.length) setCampaignList(data.map(item => ({ name: item.name, location: 'New campaign', candidates: 0, completed: 0, review: 0, status: item.status === 'active' ? 'Active' : 'Draft', minutes: '0m', tone: 'blue', primary_language: item.primary_language || 'English' })))
       })
   }, [session])
 
@@ -72,7 +73,7 @@ function App() {
     event.preventDefault()
     if (!campaignName.trim()) return
     if (supabase) {
-      const { data, error } = await supabase.from('campaigns').insert({ name: campaignName.trim(), jd_text: jdText.trim(), company_name: companyName.trim() || null, company_disclosure: companyDisclosure, status: 'draft' }).select('id, name, status').single()
+      const { data, error } = await supabase.from('campaigns').insert({ name: campaignName.trim(), jd_text: jdText.trim(), primary_language: primaryLanguage, company_name: companyName.trim() || null, company_disclosure: companyDisclosure, status: 'draft' }).select('id, name, status, primary_language').single()
       if (error) {
         setNotice(`Could not save campaign: ${error.message}`)
         return
@@ -82,11 +83,12 @@ function App() {
       if (importedCandidates.length) await supabase.from('candidates').insert(importedCandidates)
       const questions = questionText.split('\n').map((question, index) => question.trim() ? ({ campaign_id: data.id, question_text: question.trim(), sort_order: index, required: false }) : null).filter(Boolean)
       if (questions.length) await supabase.from('screening_questions').insert(questions)
-      setCampaignList(current => [{ name: data.name, location: 'New campaign', candidates: 0, completed: 0, review: 0, status: 'Draft', minutes: '0m', tone: 'blue' }, ...current])
+      setCampaignList(current => [{ name: data.name, location: 'New campaign', candidates: 0, completed: 0, review: 0, status: 'Draft', minutes: '0m', tone: 'blue', primary_language: data.primary_language }, ...current])
     }
     setShowCampaign(false)
     setNotice(`Campaign “${campaignName}” is ready for candidates.`)
     setCampaignName('')
+    setPrimaryLanguage('English')
     setJdText('')
     setCompanyName('')
     setQuestionText('')
@@ -149,13 +151,14 @@ function App() {
         </div>
       </main>
 
-      {showCampaign && <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && setShowCampaign(false)}><div className="modal modal-wide" role="dialog" aria-modal="true" aria-labelledby="modal-title"><button className="modal-close" onClick={() => setShowCampaign(false)}>×</button><div className="modal-kicker">CAMPAIGN SETUP</div><h2 id="modal-title">Create a campaign</h2><p className="muted">Set up the job, questions, and candidates before making calls.</p><form onSubmit={createCampaign}><div className="form-grid"><label>Campaign name <span>Required · becomes the job name</span><input autoFocus value={campaignName} onChange={e => setCampaignName(e.target.value)} placeholder="e.g. Senior Sales Executive" /></label><label>Company name<input value={companyName} onChange={e => setCompanyName(e.target.value)} placeholder="Your company or consultancy" /></label></div><label>Job description / requirement<textarea value={jdText} onChange={e => setJdText(e.target.value)} placeholder="Paste the requirement here." rows="3" /></label><label>Company name disclosure<select value={companyDisclosure} onChange={e => setCompanyDisclosure(e.target.value)}><option value="if_asked">Reveal only if candidate asks</option><option value="always">Always reveal</option><option value="never">Do not reveal</option></select></label><label>Screening questions <span>One question per line</span><textarea value={questionText} onChange={e => setQuestionText(e.target.value)} placeholder="What is your relevant experience?\nWhy are you considering a job change?" rows="3" /></label><div className="candidate-entry"><div><b>Add candidates</b><small>Use a CSV or add one candidate manually.</small></div><div className="form-grid"><label>Full name<input value={candidateName} onChange={e => setCandidateName(e.target.value)} placeholder="Candidate name" /></label><label>Mobile number<input value={candidatePhone} onChange={e => setCandidatePhone(e.target.value)} placeholder="+91 98765 43210" /></label></div><label className="file-label">Upload CSV<input type="file" accept=".csv,text/csv" onChange={readCandidateCsv} /><small>{candidateCsv.length ? `${candidateCsv.length} candidate(s) ready to import` : 'Required columns: full_name, mobile_number'}</small></label></div><div className="modal-actions"><button type="button" className="outline-button" onClick={() => setShowCampaign(false)}>Cancel</button><button className="primary-button" type="submit">Save campaign <span>→</span></button></div></form></div></div>}
+      {showCampaign && <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && setShowCampaign(false)}><div className="modal modal-wide" role="dialog" aria-modal="true" aria-labelledby="modal-title"><button className="modal-close" onClick={() => setShowCampaign(false)}>×</button><div className="modal-kicker">CAMPAIGN SETUP</div><h2 id="modal-title">Create a campaign</h2><p className="muted">Set up the job, questions, and candidates before making calls.</p><form onSubmit={createCampaign}><div className="form-grid"><label>Campaign name <span>Required · becomes the job name</span><input autoFocus value={campaignName} onChange={e => setCampaignName(e.target.value)} placeholder="e.g. Senior Sales Executive" /></label><label>Company name<input value={companyName} onChange={e => setCompanyName(e.target.value)} placeholder="Your company or consultancy" /></label></div><div className="form-grid"><label>Primary call language <span>Required</span><select value={primaryLanguage} onChange={e => setPrimaryLanguage(e.target.value)}><option>English</option><option>Tamil</option><option>Hindi</option></select></label><label>Company name disclosure<select value={companyDisclosure} onChange={e => setCompanyDisclosure(e.target.value)}><option value="if_asked">Reveal only if candidate asks</option><option value="always">Always reveal</option><option value="never">Do not reveal</option></select></label></div><label>Job description / requirement<textarea value={jdText} onChange={e => setJdText(e.target.value)} placeholder="Paste the requirement here." rows="3" /></label><label>Screening questions <span>One question per line</span><textarea value={questionText} onChange={e => setQuestionText(e.target.value)} placeholder="What is your relevant experience?\nWhy are you considering a job change?" rows="3" /></label><div className="candidate-entry"><div><b>Add candidates</b><small>Use a CSV or add one candidate manually.</small></div><div className="form-grid"><label>Full name<input value={candidateName} onChange={e => setCandidateName(e.target.value)} placeholder="Candidate name" /></label><label>Mobile number<input value={candidatePhone} onChange={e => setCandidatePhone(e.target.value)} placeholder="+91 98765 43210" /></label></div><label className="file-label">Upload CSV<input type="file" accept=".csv,text/csv" onChange={readCandidateCsv} /><small>{candidateCsv.length ? `${candidateCsv.length} candidate(s) ready to import` : 'Required columns: full_name, mobile_number'}</small></label></div><div className="modal-actions"><button type="button" className="outline-button" onClick={() => setShowCampaign(false)}>Cancel</button><button className="primary-button" type="submit">Save campaign <span>→</span></button></div></form></div></div>}
     </div>
   )
 }
 
 function Metric({ label, value, detail, icon, accent, progress }) { return <div className="metric-card"><div className={`metric-icon ${accent}`}>{icon}</div><div className="metric-copy"><span>{label}</span><strong>{value}</strong><small className={accent === 'red' ? 'red-text' : ''}>{detail}</small></div>{progress && <div className="mini-progress"><div style={{ width: `${progress}%` }} /></div>}</div> }
-function CampaignCard({ campaign }) { const pct = Math.round(campaign.completed / campaign.candidates * 100); return <div className="campaign-card"><div className="campaign-top"><div className={`campaign-icon ${campaign.tone}`}>⌁</div><span className={`status-pill ${campaign.status === 'Active' ? 'active' : 'completed'}`}><i />{campaign.status}</span></div><h3>{campaign.name}</h3><p className="muted">{campaign.location}</p><div className="campaign-stats"><div><b>{campaign.candidates}</b><span>Candidates</span></div><div><b>{campaign.completed}</b><span>Screened</span></div><div><b>{campaign.review}</b><span>Review</span></div></div><div className="card-progress"><div className="progress-track"><div style={{ width: `${pct}%` }} /></div><span>{pct}% complete</span><span className="campaign-minutes">◷ {campaign.minutes}</span></div></div> }
+function LanguageBadge({ language }) { return <span className="language-badge">{language || 'English'}</span> }
+function CampaignCard({ campaign }) { const pct = campaign.candidates ? Math.round(campaign.completed / campaign.candidates * 100) : 0; return <div className="campaign-card"><div className="campaign-top"><div className={`campaign-icon ${campaign.tone}`}>⌁</div><span className={`status-pill ${campaign.status === 'Active' ? 'active' : 'completed'}`}><i />{campaign.status}</span></div><div className="campaign-title-row"><h3>{campaign.name}</h3><LanguageBadge language={campaign.primary_language} /></div><p className="muted">{campaign.location}</p><div className="campaign-stats"><div><b>{campaign.candidates}</b><span>Candidates</span></div><div><b>{campaign.completed}</b><span>Screened</span></div><div><b>{campaign.review}</b><span>Review</span></div></div><div className="card-progress"><div className="progress-track"><div style={{ width: `${pct}%` }} /></div><span>{pct}% complete</span><span className="campaign-minutes">◷ {campaign.minutes}</span></div></div> }
 function Status({ label }) { const cls = label.toLowerCase().replaceAll(' ', '-'); return <span className={`result-status ${cls}`}><i />{label}</span> }
 function DataPage({ active, campaignList, onNewCampaign }) {
   const [rows, setRows] = useState([])
@@ -176,7 +179,7 @@ function DataPage({ active, campaignList, onNewCampaign }) {
   }, [active])
   useEffect(() => {
     if (!supabase || active !== 'Candidates') return
-    supabase.from('campaigns').select('id, name').order('name').then(({ data }) => setCampaignOptions(data || []))
+    supabase.from('campaigns').select('id, name, primary_language').order('name').then(({ data }) => setCampaignOptions(data || []))
   }, [active])
   const startTestCall = async (candidate) => {
     if (!window.confirm(`This will place a real test call to ${candidate.full_name} at ${candidate.mobile_number}. Continue?`)) return
