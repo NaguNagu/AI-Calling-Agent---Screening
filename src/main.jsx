@@ -33,6 +33,8 @@ function App() {
   const [notice, setNotice] = useState('')
   const [connectionState, setConnectionState] = useState(isSupabaseConfigured ? 'checking' : 'missing')
   const [campaignList, setCampaignList] = useState(campaigns)
+  const [dashboardCandidates, setDashboardCandidates] = useState([])
+  const [dashboardUsage, setDashboardUsage] = useState([])
   const [session, setSession] = useState(null)
   const [authLoading, setAuthLoading] = useState(Boolean(supabase))
   const [loginEmail, setLoginEmail] = useState('')
@@ -58,16 +60,41 @@ function App() {
 
   useEffect(() => {
     if (!supabase || !session) return
-    supabase.from('campaigns').select('id, name, status, primary_language, created_at').order('created_at', { ascending: false })
-      .then(({ data, error }) => {
-        if (error) {
-          setConnectionState('error')
-          return
-        }
-        setConnectionState('connected')
-        if (data?.length) setCampaignList(data.map(item => ({ name: item.name, location: 'New campaign', candidates: 0, completed: 0, review: 0, status: item.status === 'active' ? 'Active' : 'Draft', minutes: '0m', tone: 'blue', primary_language: item.primary_language || 'English' })))
-      })
+    Promise.all([
+      supabase.from('campaigns').select('id, name, status, primary_language, job_location, created_at').order('created_at', { ascending: false }),
+      supabase.from('candidates').select('id, campaign_id, full_name, mobile_number, status, preferred_language, recruiter_decision, created_at, campaigns(name), calls(id, status, language, started_at, duration_seconds, created_at)').order('created_at', { ascending: false }),
+      supabase.from('usage_events').select('id, campaign_id, minutes, estimated_cost, created_at').order('created_at', { ascending: false }),
+    ]).then(([campaignResult, candidateResult, usageResult]) => {
+      if (campaignResult.error || candidateResult.error || usageResult.error) {
+        setConnectionState('error')
+        return
+      }
+      const campaignRows = campaignResult.data || []
+      const candidateRows = candidateResult.data || []
+      const usageRows = usageResult.data || []
+      setConnectionState('connected')
+      setDashboardCandidates(candidateRows)
+      setDashboardUsage(usageRows)
+      setCampaignList(campaignRows.map(item => {
+        const campaignCandidates = candidateRows.filter(candidate => candidate.campaign_id === item.id)
+        const completed = campaignCandidates.filter(candidate => ['completed', 'under_review', 'shortlisted', 'rejected'].includes(candidate.status)).length
+        const review = campaignCandidates.filter(candidate => ['under_review', 'screening_incomplete'].includes(candidate.status) || candidate.recruiter_decision === 'needs_review').length
+        const campaignMinutes = usageRows.filter(event => event.campaign_id === item.id).reduce((total, event) => total + Number(event.minutes || 0), 0)
+        return { name: item.name, location: item.job_location || 'New campaign', candidates: campaignCandidates.length, completed, review, status: item.status === 'active' ? 'Active' : 'Draft', minutes: `${campaignMinutes.toFixed(2).replace(/\.00$/, '')}m`, tone: 'blue', primary_language: item.primary_language || 'English' }
+      }))
+    })
   }, [session])
+
+  const screenedCount = dashboardCandidates.filter(candidate => ['completed', 'under_review', 'shortlisted', 'rejected'].includes(candidate.status)).length
+  const reviewCount = dashboardCandidates.filter(candidate => ['under_review', 'screening_incomplete'].includes(candidate.status) || candidate.recruiter_decision === 'needs_review').length
+  const minutesUsed = dashboardUsage.reduce((total, event) => total + Number(event.minutes || 0), 0)
+  const usagePercent = Math.min(100, Math.round(minutesUsed / 1000 * 100))
+  const recentCandidates = dashboardCandidates.slice(0, 4).map(candidate => {
+    const latestCall = candidate.calls?.[0]
+    const initials = candidate.full_name.split(/\s+/).map(part => part[0]).join('').slice(0, 2).toUpperCase()
+    const duration = latestCall?.duration_seconds ? `${String(Math.floor(latestCall.duration_seconds / 60)).padStart(2, '0')}:${String(latestCall.duration_seconds % 60).padStart(2, '0')}` : '—'
+    return { initials, name: candidate.full_name, role: candidate.campaigns?.name || 'Individual call', lang: candidate.preferred_language || latestCall?.language || 'Not selected', status: candidate.status.replaceAll('_', ' '), date: new Date(candidate.created_at).toLocaleString(), duration, score: null, color: 'teal' }
+  })
 
   const createCampaign = async (event) => {
     event.preventDefault()
@@ -137,16 +164,16 @@ function App() {
 
           {active === 'Overview' ? <>
           <section className="metric-grid" aria-label="Screening overview">
-            <Metric label="Active campaigns" value="2" detail="+1 this month" icon="▣" accent="blue" />
-            <Metric label="Candidates screened" value="109" detail="↗ 18.4% vs last month" icon="♙" accent="purple" />
-            <Metric label="Minutes used" value="468" detail="of 1,000 included" icon="◷" accent="orange" progress={47} />
-            <Metric label="Need your review" value="22" detail="Across all campaigns" icon="⌁" accent="red" />
+            <Metric label="Active campaigns" value={campaignList.filter(campaign => campaign.status === 'Active').length} detail="From your live campaigns" icon="▣" accent="blue" />
+            <Metric label="Candidates screened" value={screenedCount} detail="Based on screening status" icon="♙" accent="purple" />
+            <Metric label="Minutes used" value={minutesUsed.toFixed(2).replace(/\.00$/, '')} detail="From recorded call usage" icon="◷" accent="orange" progress={usagePercent} />
+            <Metric label="Need your review" value={reviewCount} detail="Across all campaigns" icon="⌁" accent="red" />
           </section>
 
           <div className="section-heading"><div><h2>Campaigns</h2><p className="muted">Monitor your active screening campaigns.</p></div><button className="text-button" onClick={() => setActive('Campaigns')}>View all <span>→</span></button></div>
           <section className="campaign-grid">{campaignList.map(campaign => <CampaignCard key={campaign.name} campaign={campaign} />)}<button className="new-card" onClick={() => setShowCampaign(true)}><div className="new-card-icon">＋</div><b>Create a campaign</b><span>Upload a JD and start screening</span></button></section>
 
-          <section className="lower-grid"><div className="panel"><div className="panel-heading"><div><h2>Recent candidate activity</h2><p className="muted">The latest screening results from your team.</p></div><button className="filter-button">All campaigns　⌄</button></div><div className="table-wrap"><table><thead><tr><th>CANDIDATE</th><th>CAMPAIGN</th><th>LANGUAGE</th><th>STATUS</th><th>SCREENED</th><th>SCORE</th></tr></thead><tbody>{candidates.map(candidate => <tr key={candidate.name}><td><div className="candidate-cell"><div className={`avatar ${candidate.color}`}>{candidate.initials}</div><div><b>{candidate.name}</b><small>{candidate.role}</small></div></div></td><td className="role-cell">{candidate.role}</td><td><span className="language"><span className="language-dot" />{candidate.lang}</span></td><td><Status label={candidate.status} /></td><td className="date-cell">{candidate.date}<small>{candidate.duration}</small></td><td>{candidate.score ? <div className="score"><b>{candidate.score}</b><span>/100</span></div> : <span className="dash">—</span>}</td></tr>)}</tbody></table></div></div><div className="panel usage-panel"><div className="panel-heading"><div><h2>Usage this month</h2><p className="muted">Your current plan allowance.</p></div><button className="more-button">•••</button></div><div className="usage-total"><strong>468</strong><span>minutes used</span></div><div className="usage-progress"><div style={{ width: '47%' }} /></div><div className="usage-labels"><span>0 min</span><span>1,000 min</span></div><div className="usage-breakdown"><div><span className="legend-dot teal-dot" /><span>Completed calls</span><b>382 min</b></div><div><span className="legend-dot light-dot" /><span>Other / failed</span><b>86 min</b></div></div><button className="outline-button" onClick={() => setActive('Usage')}>Open usage report <span>→</span></button></div></section>
+          <section className="lower-grid"><div className="panel"><div className="panel-heading"><div><h2>Recent candidate activity</h2><p className="muted">The latest screening results from your team.</p></div><button className="filter-button">All campaigns　⌄</button></div><div className="table-wrap"><table><thead><tr><th>CANDIDATE</th><th>CAMPAIGN</th><th>LANGUAGE</th><th>STATUS</th><th>ADDED</th><th>SCORE</th></tr></thead><tbody>{recentCandidates.length ? recentCandidates.map(candidate => <tr key={candidate.name}><td><div className="candidate-cell"><div className={`avatar ${candidate.color}`}>{candidate.initials}</div><div><b>{candidate.name}</b><small>{candidate.role}</small></div></div></td><td className="role-cell">{candidate.role}</td><td><span className="language"><span className="language-dot" />{candidate.lang}</span></td><td><Status label={candidate.status} /></td><td className="date-cell">{candidate.date}<small>{candidate.duration}</small></td><td><span className="dash">—</span></td></tr>) : <tr><td colSpan="6"><div className="empty-state">Candidate activity will appear here after contacts are added.</div></td></tr>}</tbody></table></div></div><div className="panel usage-panel"><div className="panel-heading"><div><h2>Usage this month</h2><p className="muted">Your current plan allowance.</p></div><button className="more-button">•••</button></div><div className="usage-total"><strong>{minutesUsed.toFixed(2).replace(/\.00$/, '')}</strong><span>minutes used</span></div><div className="usage-progress"><div style={{ width: `${usagePercent}%` }} /></div><div className="usage-labels"><span>0 min</span><span>1,000 min</span></div><div className="usage-breakdown"><div><span className="legend-dot teal-dot" /><span>Recorded usage</span><b>{minutesUsed.toFixed(2).replace(/\.00$/, '')} min</b></div><div><span className="legend-dot light-dot" /><span>Unrecorded</span><b>—</b></div></div><button className="outline-button" onClick={() => setActive('Usage')}>Open usage report <span>→</span></button></div></section>
           </> : <DataPage active={active} campaignList={campaignList} onNewCampaign={() => setShowCampaign(true)} />}
         </div>
       </main>
