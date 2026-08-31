@@ -1,4 +1,4 @@
--- Vaani screening MVP database
+-- Kural AI screening MVP database
 -- This first version is for your internal team. All tables require login.
 
 create extension if not exists "pgcrypto";
