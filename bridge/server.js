@@ -88,10 +88,27 @@ function questionSet(questions) {
   return [...required, ...(questions || []).map((question) => ({ ...question, field: null }))]
 }
 
+const translations = {
+  Tamil: {
+    'Thank you.': 'நன்றி.',
+    'What date and time would be convenient for you for an interview?': 'நேர்காணலுக்கு உங்களுக்கு எந்த தேதி மற்றும் நேரம் வசதியாக இருக்கும்?',
+    'Would you prefer a face-to-face interview or a virtual interview?': 'நேருக்கு நேர் நேர்காணலையா அல்லது ஆன்லைன் நேர்காணலையா விரும்புகிறீர்கள்?',
+    'What is your last working day, or your notice period?': 'உங்கள் கடைசி பணிநாள் அல்லது நோட்டீஸ் காலம் என்ன?',
+    'What is the main reason you are looking for a job change?': 'வேலை மாற்றத்தை எதிர்பார்ப்பதற்கான முக்கிய காரணம் என்ன?',
+    goodbye: 'உங்கள் நேரத்திற்கு நன்றி. எங்கள் ஆட்சேர்ப்பு குழு உங்கள் பதில்களை பரிசீலித்து உங்களை தொடர்பு கொள்ளும். நன்றி.',
+  },
+  Hindi: {
+    'Thank you.': 'धन्यवाद।',
+    'What date and time would be convenient for you for an interview?': 'आपके लिए इंटरव्यू की कौन सी तारीख और समय सुविधाजनक रहेगा?',
+    'Would you prefer a face-to-face interview or a virtual interview?': 'आप आमने-सामने इंटरव्यू पसंद करेंगे या ऑनलाइन इंटरव्यू?',
+    'What is your last working day, or your notice period?': 'आपका आखिरी कार्य दिवस या नोटिस पीरियड क्या है?',
+    'What is the main reason you are looking for a job change?': 'आप नौकरी बदलने के मुख्य कारण के बारे में बताइए।',
+    goodbye: 'आपके समय के लिए धन्यवाद। हमारी भर्ती टीम आपके जवाबों की समीक्षा करके आपसे संपर्क करेगी। धन्यवाद।',
+  },
+}
+
 function localizedText(language, text) {
-  // The first bridge version keeps the screening logic in English; Sarvam still transcribes
-  // and speaks the selected language. We will add translated prompt templates after the live path is proven.
-  return text
+  return translations[language]?.[text] || text
 }
 
 class ScreeningSession {
@@ -111,7 +128,12 @@ class ScreeningSession {
   }
 
   async start() {
-    await this.sendAudio(`Hello, this is ${this.metadata.callerName || 'Kural AI'} calling for a job screening. May I speak with ${this.metadata.candidateName || 'you'}?`)
+    const intro = this.language === 'Tamil'
+      ? `வணக்கம், வேலை வாய்ப்பு தொடர்பான ஆரம்பத் தேர்வுக்காக ${this.metadata.callerName || 'Kural AI'} சார்பில் அழைக்கிறோம். ${this.metadata.candidateName || 'உங்களிடம்'} பேசலாமா?`
+      : this.language === 'Hindi'
+        ? `नमस्ते, नौकरी की प्रारंभिक स्क्रीनिंग के लिए ${this.metadata.callerName || 'Kural AI'} से कॉल कर रहे हैं। क्या मैं ${this.metadata.candidateName || 'आपसे'} बात कर सकता हूँ?`
+        : `Hello, this is ${this.metadata.callerName || 'Kural AI'} calling for a job screening. May I speak with ${this.metadata.candidateName || 'you'}?`
+    await this.sendAudio(intro)
     await this.sendAudio(this.questions[0].question_text)
   }
 
@@ -124,7 +146,7 @@ class ScreeningSession {
       this.index += 1
       if (this.index >= this.questions.length) {
         await this.saveResults()
-        await this.sendAudio('Thank you for your time. Our recruitment team will review your responses and get back to you. Goodbye.')
+        await this.sendAudio(translations[this.language]?.goodbye || 'Thank you for your time. Our recruitment team will review your responses and get back to you. Goodbye.')
         this.socket.close()
         return
       }
