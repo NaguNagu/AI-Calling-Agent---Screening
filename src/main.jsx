@@ -31,6 +31,8 @@ function App() {
   const [candidateName, setCandidateName] = useState('')
   const [candidatePhone, setCandidatePhone] = useState('')
   const [candidateCsv, setCandidateCsv] = useState([])
+  const [campaignContacts, setCampaignContacts] = useState([])
+  const [showContactList, setShowContactList] = useState(false)
   const [notice, setNotice] = useState('')
   const [connectionState, setConnectionState] = useState(isSupabaseConfigured ? 'checking' : 'missing')
   const [campaignList, setCampaignList] = useState(campaigns)
@@ -108,6 +110,8 @@ function App() {
     setCandidateName('')
     setCandidatePhone('')
     setCandidateCsv([])
+    setCampaignContacts([])
+    setShowContactList(false)
     setShowCampaign(true)
   }
 
@@ -115,6 +119,7 @@ function App() {
     const { data, error } = await supabase.from('campaigns').select('id, name, primary_language, jd_text, company_name, company_disclosure, status').eq('id', campaign.id).single()
     if (error) { setNotice(`Could not open campaign: ${error.message}`); return }
     const { data: questions } = await supabase.from('screening_questions').select('question_text').eq('campaign_id', campaign.id).eq('is_active', true).order('sort_order')
+    const { data: contacts } = await supabase.from('candidates').select('id, full_name, mobile_number, status').eq('campaign_id', campaign.id).order('created_at')
     setEditingCampaign(data)
     setCampaignName(data.name || '')
     setPrimaryLanguage(data.primary_language || 'English')
@@ -122,7 +127,27 @@ function App() {
     setCompanyName(data.company_name || '')
     setCompanyDisclosure(data.company_disclosure || 'if_asked')
     setQuestionText((questions || []).map(question => question.question_text).join('\n'))
+    setCampaignContacts(contacts || [])
+    setShowContactList(false)
     setShowCampaign(true)
+  }
+
+  const addCampaignContact = () => {
+    if (!candidateName.trim() || !candidatePhone.trim()) return
+    setCampaignContacts(current => [...current, { full_name: candidateName.trim(), mobile_number: candidatePhone.trim(), status: 'not_contacted' }])
+    setCandidateName('')
+    setCandidatePhone('')
+    setShowContactList(true)
+  }
+
+  const updateCampaignContact = (index, field, value) => setCampaignContacts(current => current.map((contact, contactIndex) => contactIndex === index ? { ...contact, [field]: value } : contact))
+
+  const deleteCampaignContact = async (contact, index) => {
+    if (contact.id) {
+      const { error } = await supabase.from('candidates').delete().eq('id', contact.id)
+      if (error) { setNotice(`Could not delete contact: ${error.message}`); return }
+    }
+    setCampaignContacts(current => current.filter((_, contactIndex) => contactIndex !== index))
   }
 
   const createCampaign = async (event) => {
@@ -138,8 +163,8 @@ function App() {
         setNotice(`Could not save campaign: ${error.message}`)
         return
       }
-      const manualCandidate = !editingCampaign && candidateName.trim() && candidatePhone.trim() ? [{ campaign_id: data.id, full_name: candidateName.trim(), mobile_number: candidatePhone.trim() }] : []
-      const importedContacts = [...manualCandidate, ...candidateCsv.map(candidate => ({ ...candidate, campaign_id: data.id }))]
+      const manualCandidate = candidateName.trim() && candidatePhone.trim() ? [{ full_name: candidateName.trim(), mobile_number: candidatePhone.trim() }] : []
+      const importedContacts = [...campaignContacts.filter(contact => !contact.id), ...manualCandidate, ...candidateCsv.map(candidate => ({ ...candidate }))].map(contact => ({ campaign_id: data.id, full_name: contact.full_name, mobile_number: contact.mobile_number }))
       if (importedContacts.length) await supabase.from('candidates').insert(importedContacts)
       const questions = questionText.split('\n').map((question, index) => question.trim() ? ({ campaign_id: data.id, question_text: question.trim(), sort_order: index, required: false }) : null).filter(Boolean)
       if (editingCampaign) await supabase.from('screening_questions').delete().eq('campaign_id', data.id)
@@ -213,7 +238,7 @@ function App() {
         </div>
       </main>
 
-      {showCampaign && <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && setShowCampaign(false)}><div className="modal modal-wide" role="dialog" aria-modal="true" aria-labelledby="modal-title"><button className="modal-close" onClick={() => setShowCampaign(false)}>×</button><div className="modal-kicker">CAMPAIGN SETUP</div><h2 id="modal-title">Create a campaign</h2><p className="muted">Set up the job, questions, and contacts before making calls.</p><form onSubmit={createCampaign}><div className="form-grid"><label>Campaign name <span>Required · becomes the job name</span><input autoFocus value={campaignName} onChange={e => setCampaignName(e.target.value)} placeholder="e.g. Senior Sales Executive" /></label><label>Company name<input value={companyName} onChange={e => setCompanyName(e.target.value)} placeholder="Your company or consultancy" /></label></div><div className="form-grid"><label>Primary call language <span>Required</span><select value={primaryLanguage} onChange={e => setPrimaryLanguage(e.target.value)}><option>English</option><option>Tamil</option><option>Hindi</option></select></label><label>Company name disclosure<select value={companyDisclosure} onChange={e => setCompanyDisclosure(e.target.value)}><option value="if_asked">Reveal only if candidate asks</option><option value="always">Always reveal</option><option value="never">Do not reveal</option></select></label></div><label>Job description / requirement<textarea value={jdText} onChange={e => setJdText(e.target.value)} placeholder="Paste the requirement here." rows="3" /></label><label>Screening questions <span>One question per line</span><textarea value={questionText} onChange={e => setQuestionText(e.target.value)} placeholder="What is your relevant experience?\nWhy are you considering a job change?" rows="3" /></label><div className="candidate-entry"><div><b>Add contacts</b><small>Use a CSV or add one candidate manually.</small></div><div className="form-grid"><label>Full name<input value={candidateName} onChange={e => setCandidateName(e.target.value)} placeholder="Candidate name" /></label><label>Mobile number<input value={candidatePhone} onChange={e => setCandidatePhone(e.target.value)} placeholder="+91 98765 43210" /></label></div><label className="file-label">Upload CSV<input type="file" accept=".csv,text/csv" onChange={readCandidateCsv} /><small>{candidateCsv.length ? `${candidateCsv.length} contact(s) ready to import` : 'Required columns: full_name, mobile_number'}</small></label></div><div className="modal-actions"><button type="button" className="outline-button" onClick={() => setShowCampaign(false)}>Cancel</button><button className="primary-button" type="submit">Save campaign <span>→</span></button></div></form></div></div>}
+      {showCampaign && <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && setShowCampaign(false)}><div className="modal modal-wide" role="dialog" aria-modal="true" aria-labelledby="modal-title"><button className="modal-close" onClick={() => setShowCampaign(false)}>×</button><div className="modal-kicker">CAMPAIGN SETUP</div><h2 id="modal-title">Create a campaign</h2><p className="muted">Set up the job, questions, and contacts before making calls.</p><form onSubmit={createCampaign}><div className="form-grid"><label>Campaign name <span>Required · becomes the job name</span><input autoFocus value={campaignName} onChange={e => setCampaignName(e.target.value)} placeholder="e.g. Senior Sales Executive" /></label><label>Company name<input value={companyName} onChange={e => setCompanyName(e.target.value)} placeholder="Your company or consultancy" /></label></div><div className="form-grid"><label>Primary call language <span>Required</span><select value={primaryLanguage} onChange={e => setPrimaryLanguage(e.target.value)}><option>English</option><option>Tamil</option><option>Hindi</option></select></label><label>Company name disclosure<select value={companyDisclosure} onChange={e => setCompanyDisclosure(e.target.value)}><option value="if_asked">Reveal only if candidate asks</option><option value="always">Always reveal</option><option value="never">Do not reveal</option></select></label></div><label>Job description / requirement<textarea value={jdText} onChange={e => setJdText(e.target.value)} placeholder="Paste the requirement here." rows="3" /></label><label>Screening questions <span>One question per line</span><textarea value={questionText} onChange={e => setQuestionText(e.target.value)} placeholder="What is your relevant experience?\nWhy are you considering a job change?" rows="3" /></label><div className="candidate-entry"><div className="candidate-entry-heading"><div><b>Add contacts</b><small>Use a CSV or add one contact manually.</small></div><button type="button" className="outline-button" onClick={addCampaignContact}>＋ Add contact</button></div><div className="form-grid"><label>Full name<input value={candidateName} onChange={e => setCandidateName(e.target.value)} placeholder="Contact name" /></label><label>Mobile number<input value={candidatePhone} onChange={e => setCandidatePhone(e.target.value)} placeholder="+91 98765 43210" /></label></div><label className="file-label">Upload CSV<input type="file" accept=".csv,text/csv" onChange={readCandidateCsv} /><small>{candidateCsv.length ? candidateCsv.length + ' contact(s) ready to import' : 'Required columns: full_name, mobile_number'}</small></label>{campaignContacts.length > 0 && <button type="button" className="text-button" onClick={() => setShowContactList(current => !current)}>{showContactList ? 'Hide contact list' : 'View contact list (' + campaignContacts.length + ')'}</button>}{showContactList && <div className="contact-list">{campaignContacts.map((contact, index) => <div className="contact-list-row" key={contact.id || index}><input value={contact.full_name} onChange={e => updateCampaignContact(index, 'full_name', e.target.value)} aria-label="Contact name" /><input value={contact.mobile_number} onChange={e => updateCampaignContact(index, 'mobile_number', e.target.value)} aria-label="Mobile number" /><span className="contact-status">{contact.status?.replaceAll('_', ' ')}</span><button type="button" className="small-call-button" onClick={() => deleteCampaignContact(contact, index)}>Delete</button></div>)}</div>}</div><div className="modal-actions"><button type="button" className="outline-button" onClick={() => setShowCampaign(false)}>Cancel</button><button className="primary-button" type="submit">Save campaign <span>→</span></button></div></form></div></div>}
     </div>
   )
 }
