@@ -3,6 +3,16 @@
 These functions keep Plivo credentials on the server and are not included in the browser bundle.
 
 - `start-call` authenticates the signed-in Kural AI user and starts an outbound Plivo call.
-- `plivo-answer` returns the temporary greeting used for the first telephony test.
+- `plivo-answer` returns a bidirectional Plivo `<Stream>` when `KURAL_STREAM_URL` is configured.
 
-The greeting is intentionally simple. After the call route is verified, this function will be replaced with the multilingual AI conversation flow.
+The WebSocket bridge is in `/bridge` because live audio connections should run on a Node/WebSocket host rather than an Edge Function.
+
+Required Supabase Edge Function secrets:
+
+- `PLIVO_AUTH_ID`
+- `PLIVO_AUTH_TOKEN`
+- `PLIVO_FROM_NUMBER`
+- `SUPABASE_SERVICE_ROLE_KEY`
+- `KURAL_STREAM_URL` (for example `wss://your-host.example/stream`)
+
+The bridge separately requires `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and `SARVAM_API_KEY`.
