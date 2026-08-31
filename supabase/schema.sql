@@ -17,7 +17,7 @@ create table if not exists public.campaigns (
   max_call_attempts integer not null default 2 check (max_call_attempts between 1 and 5),
   preferred_call_start time,
   preferred_call_end time,
-  status text not null default 'draft' check (status in ('draft', 'ready', 'active', 'completed', 'paused')),
+  status text not null default 'created' check (status in ('created', 'in_progress', 'completed', 'error', 'draft', 'ready', 'active', 'paused')),
   created_by uuid not null references auth.users(id) default auth.uid(),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -27,6 +27,11 @@ create table if not exists public.campaigns (
 alter table public.campaigns add column if not exists primary_language text not null default 'English';
 alter table public.campaigns drop constraint if exists campaigns_primary_language_check;
 alter table public.campaigns add constraint campaigns_primary_language_check check (primary_language in ('English', 'Tamil', 'Hindi'));
+
+-- Campaign status is automatic: created -> in_progress -> completed/error.
+alter table public.campaigns drop constraint if exists campaigns_status_check;
+alter table public.campaigns add constraint campaigns_status_check check (status in ('created', 'in_progress', 'completed', 'error', 'draft', 'ready', 'active', 'paused'));
+update public.campaigns set status = 'created' where status in ('draft', 'ready', 'active');
 
 create table if not exists public.candidates (
   id uuid primary key default gen_random_uuid(),
