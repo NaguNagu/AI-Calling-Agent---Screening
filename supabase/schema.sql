@@ -6,6 +6,7 @@ create extension if not exists "pgcrypto";
 create table if not exists public.campaigns (
   id uuid primary key default gen_random_uuid(),
   name text not null,
+  primary_language text not null default 'English' check (primary_language in ('English', 'Tamil', 'Hindi')),
   jd_text text,
   job_location text,
   interview_mode text check (interview_mode in ('face_to_face', 'virtual', 'both')) default 'both',
@@ -21,6 +22,11 @@ create table if not exists public.campaigns (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+-- Add this field to an already-created database as well.
+alter table public.campaigns add column if not exists primary_language text not null default 'English';
+alter table public.campaigns drop constraint if exists campaigns_primary_language_check;
+alter table public.campaigns add constraint campaigns_primary_language_check check (primary_language in ('English', 'Tamil', 'Hindi'));
 
 create table if not exists public.candidates (
   id uuid primary key default gen_random_uuid(),
