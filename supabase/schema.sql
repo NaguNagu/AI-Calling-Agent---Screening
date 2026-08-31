@@ -97,6 +97,8 @@ create table if not exists public.usage_events (
   created_at timestamptz not null default now()
 );
 
+alter table public.usage_events add constraint usage_events_call_id_unique unique (call_id);
+
 create index if not exists candidates_campaign_id_idx on public.candidates(campaign_id);
 create index if not exists screening_questions_campaign_id_idx on public.screening_questions(campaign_id);
 create index if not exists calls_candidate_id_idx on public.calls(candidate_id);
