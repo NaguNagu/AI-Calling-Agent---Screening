@@ -1,2 +1,5 @@
 [functions.plivo-answer]
 verify_jwt = false
+
+[functions.plivo-hangup]
+verify_jwt = false
