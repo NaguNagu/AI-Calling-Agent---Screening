@@ -37,7 +37,9 @@ Deno.serve(async (request) => {
   if (!callInsert.ok || !callRows?.[0]?.id) return json({ error: 'Could not create the call tracking record' }, 500)
   const callId = callRows[0].id
 
-  const answerUrl = `${supabaseUrl}/functions/v1/plivo-answer${candidateId ? `?candidate_id=${encodeURIComponent(candidateId)}` : ''}`
+  const answerParams = new URLSearchParams({ call_id: callId })
+  if (candidateId) answerParams.set('candidate_id', candidateId)
+  const answerUrl = `${supabaseUrl}/functions/v1/plivo-answer?${answerParams.toString()}`
   const hangupUrl = `${supabaseUrl}/functions/v1/plivo-hangup?call_id=${encodeURIComponent(callId)}`
   const form = new URLSearchParams({ from: fromNumber, to: normalizedNumber, answer_url: answerUrl, answer_method: 'POST', hangup_url: hangupUrl, hangup_method: 'POST' })
   const plivoResponse = await fetch(`https://api.plivo.com/v1/Account/${authId}/Call/`, {
