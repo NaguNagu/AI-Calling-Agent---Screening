@@ -28,16 +28,28 @@ Deno.serve(async (request) => {
   const authId = Deno.env.get('PLIVO_AUTH_ID')
   const authToken = Deno.env.get('PLIVO_AUTH_TOKEN')
   const fromNumber = Deno.env.get('PLIVO_FROM_NUMBER')
-  if (!authId || !authToken || !fromNumber) return json({ error: 'Plivo secrets are not configured' }, 500)
+  const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
+  if (!authId || !authToken || !fromNumber || !serviceRoleKey) return json({ error: 'Calling secrets are not configured' }, 500)
+
+  const dbHeaders = { apikey: serviceRoleKey, Authorization: `Bearer ${serviceRoleKey}`, 'Content-Type': 'application/json' }
+  const callInsert = await fetch(`${supabaseUrl}/rest/v1/calls`, { method: 'POST', headers: { ...dbHeaders, Prefer: 'return=representation' }, body: JSON.stringify({ candidate_id: candidateId || null, provider: 'plivo', status: 'queued' }) })
+  const callRows = await callInsert.json()
+  if (!callInsert.ok || !callRows?.[0]?.id) return json({ error: 'Could not create the call tracking record' }, 500)
+  const callId = callRows[0].id
 
   const answerUrl = `${supabaseUrl}/functions/v1/plivo-answer${candidateId ? `?candidate_id=${encodeURIComponent(candidateId)}` : ''}`
-  const form = new URLSearchParams({ from: fromNumber, to: normalizedNumber, answer_url: answerUrl, answer_method: 'POST' })
+  const hangupUrl = `${supabaseUrl}/functions/v1/plivo-hangup?call_id=${encodeURIComponent(callId)}`
+  const form = new URLSearchParams({ from: fromNumber, to: normalizedNumber, answer_url: answerUrl, answer_method: 'POST', hangup_url: hangupUrl, hangup_method: 'POST' })
   const plivoResponse = await fetch(`https://api.plivo.com/v1/Account/${authId}/Call/`, {
     method: 'POST',
     headers: { Authorization: `Basic ${btoa(`${authId}:${authToken}`)}`, 'Content-Type': 'application/x-www-form-urlencoded' },
     body: form,
   })
   const result = await plivoResponse.json()
-  if (!plivoResponse.ok) return json({ error: result?.error || 'Plivo could not start the call' }, plivoResponse.status)
+  if (!plivoResponse.ok) {
+    await fetch(`${supabaseUrl}/rest/v1/calls?id=eq.${callId}`, { method: 'PATCH', headers: dbHeaders, body: JSON.stringify({ status: 'failed', failure_reason: result?.error || 'Plivo could not start the call' }) })
+    return json({ error: result?.error || 'Plivo could not start the call' }, plivoResponse.status)
+  }
+  await fetch(`${supabaseUrl}/rest/v1/calls?id=eq.${callId}`, { method: 'PATCH', headers: dbHeaders, body: JSON.stringify({ provider_call_id: result.request_uuid, status: 'queued' }) })
   return json({ ok: true, request_uuid: result.request_uuid, message: 'Test call started' })
 })
