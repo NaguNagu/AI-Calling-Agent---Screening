@@ -5,6 +5,11 @@ const corsHeaders = {
 }
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
+const normalizeIndianNumber = (value: string) => {
+  const digits = String(value || '').replace(/[^0-9]/g, '')
+  const normalized = digits.length === 10 ? `+91${digits}` : String(value || '').trim()
+  return /^\+91[6-9]\d{9}$/.test(normalized) ? normalized : null
+}
 
 Deno.serve(async (request) => {
   if (request.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
@@ -43,13 +48,19 @@ Deno.serve(async (request) => {
   let started = 0
   let failed = 0
   for (const candidate of candidates) {
+    const toNumber = normalizeIndianNumber(candidate.mobile_number)
+    if (!toNumber) {
+      failed += 1
+      await fetch(`${supabaseUrl}/rest/v1/candidates?id=eq.${encodeURIComponent(candidate.id)}`, { method: 'PATCH', headers: dbHeaders, body: JSON.stringify({ status: 'failed' }) })
+      continue
+    }
     const callInsert = await fetch(`${supabaseUrl}/rest/v1/calls`, { method: 'POST', headers: { ...dbHeaders, Prefer: 'return=representation' }, body: JSON.stringify({ candidate_id: candidate.id, provider: 'plivo', status: 'queued' }) })
     const callRows = await callInsert.json()
     const callId = callRows?.[0]?.id
     if (!callId) { failed += 1; continue }
     const answerUrl = `${supabaseUrl}/functions/v1/plivo-answer?call_id=${encodeURIComponent(callId)}&candidate_id=${encodeURIComponent(candidate.id)}`
     const hangupUrl = `${supabaseUrl}/functions/v1/plivo-hangup?call_id=${encodeURIComponent(callId)}`
-    const form = new URLSearchParams({ from: fromNumber, to: candidate.mobile_number, answer_url: answerUrl, answer_method: 'POST', hangup_url: hangupUrl, hangup_method: 'POST' })
+    const form = new URLSearchParams({ from: fromNumber, to: toNumber, answer_url: answerUrl, answer_method: 'POST', hangup_url: hangupUrl, hangup_method: 'POST' })
     const plivoResponse = await fetch(`https://api.plivo.com/v1/Account/${authId}/Call/`, { method: 'POST', headers: { Authorization: `Basic ${btoa(`${authId}:${authToken}`)}`, 'Content-Type': 'application/x-www-form-urlencoded' }, body: form })
     const result = await plivoResponse.json()
     if (!plivoResponse.ok) {
