@@ -11,7 +11,7 @@ const KEY_ANSWERS = [
   ['reason_for_job_change', 'Reason for change'],
 ]
 
-export default function ContactDrawer({ contact, onClose, onCall, onChanged, notify }) {
+export default function ContactDrawer({ contact, onClose, onCall, onDelete, onChanged, notify }) {
   const [details, setDetails] = useState(null)
   const [calls, setCalls] = useState([])
   const [notes, setNotes] = useState('')
@@ -107,6 +107,10 @@ export default function ContactDrawer({ contact, onClose, onCall, onChanged, not
               </div>
             )
           }) : <EmptyState icon="phone" title="Not called yet">Press “Call now” to start a screening call.</EmptyState>}
+        </section>
+
+        <section className="drawer-section danger-zone">
+          <Button size="sm" icon="trash" className="btn-danger-outline" disabled={person.status === 'calling'} onClick={() => onDelete(person)}>Delete this contact</Button>
         </section>
       </div>
     </Drawer>

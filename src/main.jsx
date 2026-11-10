@@ -135,6 +135,41 @@ function Workspace({ session }) {
       reload()
     },
 
+    deleteContact: async (contact) => {
+      const ok = await confirm({ title: `Delete ${contact.full_name}?`, message: `This permanently removes ${contact.full_name} (${contact.mobile_number}) along with their call history and answers. This can’t be undone.`, confirmLabel: 'Delete contact', tone: 'danger', icon: 'trash' })
+      if (ok !== 'confirm') return
+      const { error: deleteError } = await supabase.from('candidates').delete().eq('id', contact.id)
+      if (deleteError) { notify({ tone: 'danger', text: `Couldn’t delete: ${deleteError.message}` }); return }
+      setDrawerContact(current => current?.id === contact.id ? null : current)
+      notify({ text: `${contact.full_name} was deleted.` })
+      reload()
+    },
+
+    deleteCampaign: async (campaign) => {
+      const contacts = data.candidates.filter(c => c.campaign_id === campaign.id)
+      const n = contacts.length
+      const choice = await confirm({
+        title: `Delete “${campaign.name}”?`,
+        message: n
+          ? `This campaign has ${n} contact${n === 1 ? '' : 's'}. You can delete them too (with their call history and answers), or keep them as individual contacts. This can’t be undone.`
+          : 'This permanently removes the campaign and its screening questions. This can’t be undone.',
+        confirmLabel: n ? `Delete campaign and ${n} contact${n === 1 ? '' : 's'}` : 'Delete campaign',
+        secondaryLabel: n ? 'Delete campaign, keep contacts' : undefined,
+        tone: 'danger', icon: 'trash',
+      })
+      if (!choice) return
+      if (contacts.some(c => c.status === 'calling')) { notify({ tone: 'danger', text: 'A call is in progress for this campaign. Try again when it ends.' }); return }
+      if (choice === 'confirm' && n) {
+        const { error: e1 } = await supabase.from('candidates').delete().eq('campaign_id', campaign.id)
+        if (e1) { notify({ tone: 'danger', text: `Couldn’t delete the contacts: ${e1.message}` }); return }
+      }
+      const { error: e2 } = await supabase.from('campaigns').delete().eq('id', campaign.id)
+      if (e2) { notify({ tone: 'danger', text: `Couldn’t delete the campaign: ${e2.message}` }); reload(); return }
+      setReportCampaign(current => current?.id === campaign.id ? null : current)
+      notify({ text: `“${campaign.name}” was deleted${choice === 'secondary' && n ? '. Its contacts are kept as individual calls' : ''}.` })
+      reload()
+    },
+
     duplicateCampaign: async (campaign) => {
       const choice = await confirm({ title: `Duplicate “${campaign.name}”?`, message: 'The copy gets the same job details and questions. Do you also want to copy its contacts? Copied contacts start as “Not contacted”.', confirmLabel: 'Copy with contacts', secondaryLabel: 'Settings only', icon: 'copy' })
       if (!choice) return
@@ -202,7 +237,7 @@ function Workspace({ session }) {
 
       {formCampaign && <CampaignForm campaign={formCampaign} notify={notify} onClose={closeForm} onSaved={(message) => { setFormCampaign(null); notify(message); reload() }} />}
       {reportCampaign && <CampaignReport campaign={reportCampaign} data={data} actions={actions} onClose={() => setReportCampaign(null)} />}
-      {drawerContact && <ContactDrawer key={drawerContact.id} contact={drawerContact} notify={notify} onClose={() => setDrawerContact(null)} onCall={actions.callContact} onChanged={reload} />}
+      {drawerContact && <ContactDrawer key={drawerContact.id} contact={drawerContact} notify={notify} onClose={() => setDrawerContact(null)} onCall={actions.callContact} onDelete={actions.deleteContact} onChanged={reload} />}
       {addingContact && <AddContactModal campaigns={data.campaigns} notify={notify} onClose={() => setAddingContact(false)} onSaved={(message) => { setAddingContact(false); notify(message); reload() }} />}
       {confirmDialog}
       <Toast toast={toast} onClose={closeToast} />

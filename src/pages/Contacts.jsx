@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import Icon from '../components/Icon'
-import { Avatar, Button, DecisionBadge, EmptyState, StatusBadge } from '../components/ui'
+import { Avatar, Button, DecisionBadge, EmptyState, IconButton, StatusBadge } from '../components/ui'
 import { SCREENED, formatDateTime, formatDuration, latestCall, needsReview } from '../lib/format'
 
 const FILTERS = [
@@ -69,6 +69,7 @@ export default function Contacts({ data, actions, initialFilter }) {
                         <div className="row-actions">
                           <Button size="sm" icon="phone" disabled={contact.status === 'calling'} onClick={() => actions.callContact(contact)}>{contact.status === 'calling' ? 'Calling…' : 'Call'}</Button>
                           <Button size="sm" variant="ghost" onClick={() => actions.openContact(contact)}>View <Icon name="chevronRight" size={14} /></Button>
+                          <IconButton icon="trash" label="Delete contact" className="danger" disabled={contact.status === 'calling'} onClick={() => actions.deleteContact(contact)} />
                         </div>
                       </td>
                     </tr>

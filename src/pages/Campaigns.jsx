@@ -56,6 +56,7 @@ export default function Campaigns({ data, actions }) {
                           <IconButton icon="report" label="View report" onClick={() => actions.openReport(campaign)} />
                           <IconButton icon="edit" label="Edit campaign" onClick={() => actions.editCampaign(campaign)} />
                           <IconButton icon="copy" label="Duplicate campaign" onClick={() => actions.duplicateCampaign(campaign)} />
+                          <IconButton icon="trash" label="Delete campaign" className="danger" disabled={state.key === 'running'} onClick={() => actions.deleteCampaign(campaign)} />
                         </div>
                       </td>
                     </tr>

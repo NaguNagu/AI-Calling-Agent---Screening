@@ -89,9 +89,15 @@ input[type=checkbox], input[type=radio] { accent-color: var(--brand); width: 16p
 .btn-ghost { background: transparent; color: var(--brand); }
 .btn-ghost:hover:not(:disabled) { background: var(--brand-soft); }
 .btn-danger { background: var(--danger); color: #fff; }
+.btn-danger:hover:not(:disabled) { background: #991b1b; }
+.btn-danger-outline { background: var(--surface); border-color: #fca5a5; color: var(--danger); }
+.btn-danger-outline:hover:not(:disabled) { background: var(--danger-bg); }
+.danger-zone { border-top: 1px solid var(--border); padding-top: 18px; justify-items: start; }
 .btn:disabled { opacity: .5; }
 .icon-btn { width: 32px; height: 32px; display: inline-grid; place-items: center; border-radius: var(--radius-sm); border: 1px solid transparent; background: transparent; color: var(--muted); flex-shrink: 0; }
 .icon-btn:hover { background: var(--neutral-bg); color: var(--text); }
+.icon-btn.danger:hover:not(:disabled) { background: var(--danger-bg); color: var(--danger); }
+.icon-btn:disabled { opacity: .35; cursor: not-allowed; background: transparent; }
 
 /* ---------- Badges ---------- */
 .badge { display: inline-flex; align-items: center; gap: 6px; padding: 2px 9px; border-radius: 999px; font-size: 12px; font-weight: 500; white-space: nowrap; line-height: 20px; }

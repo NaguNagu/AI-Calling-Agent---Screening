@@ -11,8 +11,8 @@ export function Button({ variant = 'secondary', size, icon, children, className 
   )
 }
 
-export function IconButton({ icon, label, ...props }) {
-  return <button className="icon-btn" aria-label={label} title={label} {...props}><Icon name={icon} size={16} /></button>
+export function IconButton({ icon, label, className = '', ...props }) {
+  return <button className={`icon-btn ${className}`} aria-label={label} title={label} {...props}><Icon name={icon} size={16} /></button>
 }
 
 export function Badge({ tone = 'neutral', children, dot = true }) {
