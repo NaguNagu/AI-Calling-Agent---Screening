@@ -207,6 +207,22 @@ function App() {
     reader.readAsText(file)
   }
 
+  const duplicateCampaign = async (campaign, copyContacts) => {
+    const { data: source, error } = await supabase.from('campaigns').select('id, name, primary_language, jd_text, company_name, company_disclosure').eq('id', campaign.id).single()
+    if (error) { setNotice(`Could not duplicate campaign: ${error.message}`); return null }
+    const { data: copy, error: copyError } = await supabase.from('campaigns').insert({ name: `${source.name} (Copy)`, primary_language: source.primary_language, jd_text: source.jd_text, company_name: source.company_name, company_disclosure: source.company_disclosure, status: 'created' }).select('id, name, status, primary_language, created_at').single()
+    if (copyError) { setNotice(`Could not duplicate campaign: ${copyError.message}`); return null }
+    const { data: questions } = await supabase.from('screening_questions').select('question_text, required, sort_order, is_active').eq('campaign_id', source.id)
+    if (questions?.length) await supabase.from('screening_questions').insert(questions.map(question => ({ ...question, campaign_id: copy.id })))
+    if (copyContacts) {
+      const { data: contacts } = await supabase.from('candidates').select('full_name, mobile_number').eq('campaign_id', source.id)
+      if (contacts?.length) await supabase.from('candidates').insert(contacts.map(contact => ({ ...contact, campaign_id: copy.id, status: 'not_contacted' })))
+    }
+    setCampaignList(current => [{ name: copy.name, location: 'New campaign', candidates: 0, completed: 0, review: 0, status: 'Created', minutes: '0m', tone: 'blue', primary_language: copy.primary_language }, ...current])
+    setNotice(`Campaign “${copy.name}” was created${copyContacts ? ' with copied contacts' : ''}.`)
+    return copy
+  }
+
   if (supabase && authLoading) return <div className="auth-loading">Opening your secure workspace…</div>
   if (supabase && !session) return <LoginScreen email={loginEmail} setEmail={setLoginEmail} password={loginPassword} setPassword={setLoginPassword} error={loginError} onSubmit={signIn} />
 
@@ -219,14 +235,14 @@ function App() {
         <nav className="nav-list" aria-label="Main navigation">
           {[["Overview", '◈'], ["Campaigns", '▣'], ["Contacts", '♙'], ["Usage", '◒']].map(([item, icon]) => <button key={item} className={`nav-item ${active === item ? 'selected' : ''}`} onClick={() => setActive(item)}><Icon>{icon}</Icon>{item}</button>)}
         </nav>
-        <div className="sidebar-bottom"><button className="nav-item"><Icon>⚙</Icon>Settings</button><div className="help-card"><div className="help-icon">?</div><div><b>Need a hand?</b><small>Read the quick guide</small></div><span>↗</span></div><div className="user-row"><div className="avatar avatar-small">NS</div><div><b>Nagesh S.</b><small>Admin</small></div><span className="more">•••</span></div></div>
+        <div className="sidebar-bottom"><button className={`nav-item ${active === 'Settings' ? 'selected' : ''}`} onClick={() => setActive('Settings')}><Icon>⚙</Icon>Settings</button><div className="help-card"><div className="help-icon">?</div><div><b>Need a hand?</b><small>Read the quick guide</small></div><span>↗</span></div><div className="user-row"><div className="avatar avatar-small">NS</div><div><b>Nagesh S.</b><small>Admin</small></div><span className="more">•••</span></div></div>
       </aside>
 
       <main className="main-content">
         <header className="topbar"><div className="breadcrumb">Workspace <span>/</span> {active}</div><div className="top-actions"><span className={`connection-badge ${connectionState}`}><i />{connectionState === 'connected' ? 'Supabase connected' : connectionState === 'checking' ? 'Connecting…' : 'Demo mode'}</span><button className="icon-button" aria-label="Notifications">♢<span className="notification-dot" /></button><div className="avatar">NS</div></div></header>
         <div className="content-wrap">
           {notice && <div className="toast"><span>✓</span>{notice}</div>}
-          <div className="page-heading"><div><p className="eyebrow">SUNDAY, AUGUST 30, 2026</p><h1>Good afternoon, Nagesh <span className="wave">✦</span></h1><p className="muted">Here’s what’s happening with your contact screening today.</p></div>{active !== 'Contacts' && <button className="primary-button" onClick={openNewCampaign}><span>＋</span> New campaign</button>}</div>
+          <div className="page-heading"><div><p className="eyebrow">SUNDAY, AUGUST 30, 2026</p><h1>Good afternoon, Nagesh <span className="wave">✦</span></h1><p className="muted">Here’s what’s happening with your contact screening today.</p></div>{active !== 'Contacts' && active !== 'Settings' && <button className="primary-button" onClick={openNewCampaign}><span>＋</span> New campaign</button>}</div>
 
           {active === 'Overview' ? <>
           <section className="metric-grid" aria-label="Screening overview">
@@ -240,7 +256,7 @@ function App() {
           <section className="campaign-grid">{campaignList.map(campaign => <CampaignCard key={campaign.name} campaign={campaign} />)}<button className="new-card" onClick={() => setShowCampaign(true)}><div className="new-card-icon">＋</div><b>Create a campaign</b><span>Upload a JD and start screening</span></button></section>
 
           <section className="lower-grid"><div className="panel"><div className="panel-heading"><div><h2>Recent contact activity</h2><p className="muted">The latest screening results from your team.</p></div><button className="filter-button">All campaigns　⌄</button></div><div className="table-wrap"><table><thead><tr><th>CANDIDATE</th><th>CAMPAIGN</th><th>LANGUAGE</th><th>STATUS</th><th>ADDED</th><th>SCORE</th></tr></thead><tbody>{recentContacts.length ? recentContacts.map(candidate => <tr key={candidate.name}><td><div className="candidate-cell"><div className={`avatar ${candidate.color}`}>{candidate.initials}</div><div><b>{candidate.name}</b><small>{candidate.role}</small></div></div></td><td className="role-cell">{candidate.role}</td><td><span className="language"><span className="language-dot" />{candidate.lang}</span></td><td><Status label={candidate.status} /></td><td className="date-cell">{candidate.date}<small>{candidate.duration}</small></td><td><span className="dash">—</span></td></tr>) : <tr><td colSpan="6"><div className="empty-state">Candidate activity will appear here after contacts are added.</div></td></tr>}</tbody></table></div></div><div className="panel usage-panel"><div className="panel-heading"><div><h2>Usage this month</h2><p className="muted">Your current plan allowance.</p></div><button className="more-button">•••</button></div><div className="usage-total"><strong>{minutesUsed.toFixed(2).replace(/\.00$/, '')}</strong><span>minutes used</span></div><div className="usage-progress"><div style={{ width: `${usagePercent}%` }} /></div><div className="usage-labels"><span>0 min</span><span>1,000 min</span></div><div className="usage-breakdown"><div><span className="legend-dot teal-dot" /><span>Recorded usage</span><b>{minutesUsed.toFixed(2).replace(/\.00$/, '')} min</b></div><div><span className="legend-dot light-dot" /><span>Unrecorded</span><b>—</b></div></div><button className="outline-button" onClick={() => setActive('Usage')}>Open usage report <span>→</span></button></div></section>
-          </> : <DataPage active={active} campaignList={campaignList} onNewCampaign={openNewCampaign} onEditCampaign={openEditCampaign} />}
+          </> : active === 'Settings' ? <SettingsPage session={session} /> : <DataPage active={active} campaignList={campaignList} onNewCampaign={openNewCampaign} onEditCampaign={openEditCampaign} onDuplicateCampaign={duplicateCampaign} />}
         </div>
       </main>
 
@@ -249,12 +265,35 @@ function App() {
   )
 }
 
+function SettingsPage({ session }) {
+  const [provider, setProvider] = useState('plivo_sarvam')
+  const [phoneNumber, setPhoneNumber] = useState('')
+  const [plivoReady, setPlivoReady] = useState(false)
+  const [sarvamReady, setSarvamReady] = useState(true)
+  const [message, setMessage] = useState('')
+  useEffect(() => {
+    if (!supabase || !session?.user?.id) return
+    supabase.from('workspace_settings').select('telephony_provider, phone_number, plivo_ready, sarvam_ready').eq('user_id', session.user.id).maybeSingle().then(({ data }) => {
+      if (!data) return
+      setProvider(data.telephony_provider || 'plivo_sarvam')
+      setPhoneNumber(data.phone_number || '')
+      setPlivoReady(Boolean(data.plivo_ready))
+      setSarvamReady(Boolean(data.sarvam_ready))
+    })
+  }, [session])
+  const saveSettings = async (event) => {
+    event.preventDefault()
+    const { error } = await supabase.from('workspace_settings').upsert({ user_id: session.user.id, telephony_provider: provider, phone_number: phoneNumber.trim() || null, plivo_ready: plivoReady, sarvam_ready: sarvamReady }, { onConflict: 'user_id' })
+    setMessage(error ? `Could not save settings: ${error.message}` : 'Calling settings saved for this workspace.')
+  }
+  return <div className="settings-page"><div className="settings-intro"><p className="eyebrow">WORKSPACE SETTINGS</p><h2>Calling &amp; AI integrations</h2><p className="muted">Choose how this workspace places calls. Each future SaaS customer can use its own preferred provider.</p></div><form onSubmit={saveSettings}><div className="settings-grid"><label className={`provider-card ${provider === 'plivo_sarvam' ? 'selected' : ''}`}><input type="radio" name="provider" checked={provider === 'plivo_sarvam'} onChange={() => setProvider('plivo_sarvam')} /><div><b>Plivo + Sarvam</b><span>Use Plivo for Indian telephony and Sarvam for multilingual AI conversations.</span><small className={plivoReady ? 'connected-text' : ''}>{plivoReady ? '● Connected' : '○ Needs connection'}</small></div></label><label className={`provider-card ${provider === 'sarvam_voice_agents' ? 'selected' : ''}`}><input type="radio" name="provider" checked={provider === 'sarvam_voice_agents'} onChange={() => setProvider('sarvam_voice_agents')} /><div><b>Sarvam Voice Agents</b><span>Use Sarvam for telephony, outbound campaigns and the complete voice-agent stack.</span><small className={sarvamReady ? 'connected-text' : ''}>{sarvamReady ? '● Ready to configure' : '○ Needs connection'}</small></div></label></div><div className="settings-panel"><div className="settings-panel-heading"><div><h3>Workspace calling number</h3><p className="muted">The number candidates will see for outbound calls.</p></div><span className="secure-note">🔒 Secrets stay server-side</span></div><label>Phone number<input value={phoneNumber} onChange={event => setPhoneNumber(event.target.value)} placeholder="+91 80 3170 7356" /></label><div className="settings-status-row"><label className="checkbox-label"><input type="checkbox" checked={plivoReady} onChange={event => setPlivoReady(event.target.checked)} /> Plivo connection configured</label><label className="checkbox-label"><input type="checkbox" checked={sarvamReady} onChange={event => setSarvamReady(event.target.checked)} /> Sarvam connection configured</label></div><p className="settings-help">API keys are managed securely by the Kural AI backend. They are never displayed or stored in this browser.</p><div className="settings-actions"><button className="primary-button" type="submit">Save integration settings <span>→</span></button>{message && <span className="settings-message">{message}</span>}</div></div></form></div>
+}
 function Metric({ label, value, detail, icon, accent, progress }) { return <div className="metric-card"><div className={`metric-icon ${accent}`}>{icon}</div><div className="metric-copy"><span>{label}</span><strong>{value}</strong><small className={accent === 'red' ? 'red-text' : ''}>{detail}</small></div>{progress && <div className="mini-progress"><div style={{ width: `${progress}%` }} /></div>}</div> }
 function LanguageBadge({ language }) { return <span className="language-badge">{language || 'English'}</span> }
 function CampaignCard({ campaign }) { const pct = campaign.candidates ? Math.round(campaign.completed / campaign.candidates * 100) : 0; return <div className="campaign-card"><div className="campaign-top"><div className={`campaign-icon ${campaign.tone}`}>⌁</div><span className={`status-pill ${campaign.status === 'Active' ? 'active' : 'completed'}`}><i />{campaign.status}</span></div><div className="campaign-title-row"><h3>{campaign.name}</h3><LanguageBadge language={campaign.primary_language} /></div><p className="muted">{campaign.location}</p><div className="campaign-stats"><div><b>{campaign.candidates}</b><span>Contacts</span></div><div><b>{campaign.completed}</b><span>Screened</span></div><div><b>{campaign.review}</b><span>Review</span></div></div><div className="card-progress"><div className="progress-track"><div style={{ width: `${pct}%` }} /></div><span>{pct}% complete</span><span className="campaign-minutes">◷ {campaign.minutes}</span></div></div> }
 function Status({ label }) { const cls = label.toLowerCase().replaceAll(' ', '-'); return <span className={`result-status ${cls}`}><i />{label}</span> }
 function campaignStatusLabel(status) { return ({ created: 'Created', draft: 'Created', ready: 'Created', active: 'Created', in_progress: 'In progress', completed: 'Completed', error: 'Error', paused: 'Paused' })[status] || 'Created' }
-function DataPage({ active, campaignList, onNewCampaign, onEditCampaign }) {
+function DataPage({ active, campaignList, onNewCampaign, onEditCampaign, onDuplicateCampaign }) {
   const [rows, setRows] = useState([])
   const [loading, setLoading] = useState(true)
   const [callMessage, setCallMessage] = useState('')
@@ -263,6 +302,8 @@ function DataPage({ active, campaignList, onNewCampaign, onEditCampaign }) {
   const [contactPhone, setContactPhone] = useState('')
   const [contactCampaign, setContactCampaign] = useState('')
   const [campaignOptions, setCampaignOptions] = useState([])
+  const [reportCampaign, setReportCampaign] = useState(null)
+  const [reportRows, setReportRows] = useState([])
   useEffect(() => {
     if (!supabase) return
     const table = active === 'Contacts' ? 'candidates' : active === 'Campaigns' ? 'campaigns' : 'usage_events'
@@ -275,6 +316,13 @@ function DataPage({ active, campaignList, onNewCampaign, onEditCampaign }) {
     if (!supabase || active !== 'Contacts') return
     supabase.from('campaigns').select('id, name, primary_language').order('name').then(({ data }) => setCampaignOptions(data || []))
   }, [active])
+  const openReport = async (campaign) => {
+    const { data, error } = await supabase.from('candidates').select('id, full_name, mobile_number, status, calls(id, status, duration_seconds, failure_reason, created_at)').eq('campaign_id', campaign.id).order('created_at', { ascending: false })
+    if (error) { setCallMessage(`Report could not be loaded: ${error.message}`); return }
+    setReportCampaign(campaign)
+    setReportRows(data || [])
+  }
+
   const startTestCall = async (candidate) => {
     if (!window.confirm(`This will place a real test call to ${candidate.full_name} at ${candidate.mobile_number}. Continue?`)) return
     setCallMessage(`Starting call to ${candidate.full_name}…`)
@@ -282,11 +330,14 @@ function DataPage({ active, campaignList, onNewCampaign, onEditCampaign }) {
     setCallMessage(error ? `Call could not be started: ${error.message}` : `Call started to ${candidate.full_name}.`)
   }
   const startCampaign = async (campaign) => {
-    if (!window.confirm(`Start calling all ready candidates in “${campaign.name}”?`)) return
+    const warning = campaign.status === 'completed'
+      ? 'This campaign is already completed. Completed contacts will be skipped, and only new or not-yet-contacted contacts will be called. Start it again?'
+      : `Start calling all ready contacts in “${campaign.name}”?`
+    if (!window.confirm(warning)) return
     setCallMessage(`Starting campaign “${campaign.name}”…`)
     const { data, error } = await supabase.functions.invoke('start-campaign', { body: { campaign_id: campaign.id } })
     if (error) { setCallMessage(`Campaign could not be started: ${error.message}`); return }
-    setRows(current => current.map(item => item.id === campaign.id ? { ...item, status: data?.ok ? 'in_progress' : 'error' } : item))
+    setRows(current => current.map(item => item.id === campaign.id ? { ...item, status: data?.ok ? 'in_progress' : item.status } : item))
     setCallMessage(data?.message || 'Campaign started.')
   }
   const addContact = async (event) => {
@@ -303,9 +354,14 @@ function DataPage({ active, campaignList, onNewCampaign, onEditCampaign }) {
     setContactCampaign('')
     setCallMessage(`Contact added for ${data.full_name}.`)
   }
+  const duplicateFromRow = async (row) => {
+    const copyContacts = window.confirm(`Copy the contacts from “${row.name}” into the duplicate? Click Cancel to duplicate campaign settings only.`)
+    const copy = await onDuplicateCampaign(row, copyContacts)
+    if (copy) setRows(current => [{ ...copy }, ...current])
+  }
   const title = active === 'Contacts' ? 'Contacts' : active === 'Campaigns' ? 'Campaigns' : 'Usage report'
   const description = active === 'Contacts' ? 'Review every candidate imported into your campaigns.' : active === 'Campaigns' ? 'Create and manage your screening campaigns.' : 'Track calling minutes and estimated costs as the agent goes live.'
-  return <div className="data-page"><div className="data-page-heading"><div><p className="eyebrow">WORKSPACE DATA</p><h2>{title}</h2><p className="muted">{description}</p></div>{active === 'Campaigns' && <button className="primary-button" onClick={onNewCampaign}>＋ New campaign</button>}{active === 'Contacts' && <button className="primary-button" onClick={() => setShowContact(true)}>＋ New contact</button>}</div>{callMessage && <div className="call-message">{callMessage}</div>}<div className="panel data-panel">{loading ? <div className="empty-state">Loading your {title.toLowerCase()}…</div> : active === 'Contacts' ? <table className="data-table"><thead><tr><th>NAME</th><th>MOBILE</th><th>CAMPAIGN</th><th>STATUS</th><th>LANGUAGE</th><th>ACTION</th></tr></thead><tbody>{rows.length ? rows.map(row => <tr key={row.id}><td><b>{row.full_name}</b></td><td>{row.mobile_number}</td><td>{row.campaigns?.name || 'Individual call'}</td><td><Status label={row.status.replaceAll('_', ' ')} /></td><td>{row.preferred_language || 'Not selected'}</td><td><button className="small-call-button" onClick={() => startTestCall(row)}>Test call</button></td></tr>) : <tr><td colSpan="6"><div className="empty-state">No contacts yet. Add a contact to place an individual call.</div></td></tr>}</tbody></table> : active === 'Campaigns' ? <table className="data-table"><thead><tr><th>CAMPAIGN</th><th>STATUS</th><th>CREATED</th><th>ACTION</th></tr></thead><tbody>{rows.length ? rows.map(row => <tr key={row.id}><td><b>{row.name}</b></td><td><span className={`campaign-status ${row.status}`}><i />{campaignStatusLabel(row.status)}</span></td><td>{new Date(row.created_at).toLocaleDateString()}</td><td>{['created', 'draft', 'ready', 'active'].includes(row.status) ? <button className="small-call-button" onClick={() => startCampaign(row)}>Start campaign</button> : null}<button className="small-call-button" onClick={() => onEditCampaign(row)}>Edit</button></td></tr>) : <tr><td colSpan="4"><div className="empty-state">No campaigns yet.</div></td></tr>}</tbody></table> : <div className="usage-report-grid"><div className="report-number"><span>Total minutes</span><strong>0</strong><small>Call usage will appear here after telephony is connected.</small></div><div className="report-number"><span>Estimated cost</span><strong>₹0</strong><small>Provider charges will be recorded automatically.</small></div><div className="report-number"><span>Events recorded</span><strong>{rows.length}</strong><small>Usage events from your connected providers.</small></div></div>}</div>{showContact && <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && setShowContact(false)}><div className="modal" role="dialog" aria-modal="true" aria-labelledby="contact-title"><button className="modal-close" onClick={() => setShowContact(false)}>×</button><div className="modal-kicker">INDIVIDUAL CONTACT</div><h2 id="contact-title">Add a new contact</h2><p className="muted">Add a person for an individual outbound call. Campaign assignment is optional.</p><form onSubmit={addContact}><label>Full name<input autoFocus value={contactName} onChange={event => setContactName(event.target.value)} placeholder="Candidate name" required /></label><label>Mobile number<input value={contactPhone} onChange={event => setContactPhone(event.target.value)} placeholder="+91 98765 43210" required /></label><label>Assign to campaign <span>Optional</span><select value={contactCampaign} onChange={event => setContactCampaign(event.target.value)}><option value="">Individual call — no campaign</option>{campaignOptions.map(campaign => <option key={campaign.id} value={campaign.id}>{campaign.name}</option>)}</select></label><div className="modal-actions"><button type="button" className="outline-button" onClick={() => setShowContact(false)}>Cancel</button><button className="primary-button" type="submit">Add contact <span>→</span></button></div></form></div></div>}</div>
+  return <div className="data-page"><div className="data-page-heading"><div><p className="eyebrow">WORKSPACE DATA</p><h2>{title}</h2><p className="muted">{description}</p></div>{active === 'Campaigns' && <button className="primary-button" onClick={onNewCampaign}>＋ New campaign</button>}{active === 'Contacts' && <button className="primary-button" onClick={() => setShowContact(true)}>＋ New contact</button>}</div>{callMessage && <div className="call-message">{callMessage}</div>}<div className="panel data-panel">{loading ? <div className="empty-state">Loading your {title.toLowerCase()}…</div> : active === 'Contacts' ? <table className="data-table"><thead><tr><th>NAME</th><th>MOBILE</th><th>CAMPAIGN</th><th>STATUS</th><th>LANGUAGE</th><th>ACTION</th></tr></thead><tbody>{rows.length ? rows.map(row => <tr key={row.id}><td><b>{row.full_name}</b></td><td>{row.mobile_number}</td><td>{row.campaigns?.name || 'Individual call'}</td><td><Status label={row.status.replaceAll('_', ' ')} /></td><td>{row.preferred_language || 'Not selected'}</td><td><button className="small-call-button" onClick={() => startTestCall(row)}>Test call</button></td></tr>) : <tr><td colSpan="6"><div className="empty-state">No contacts yet. Add a contact to place an individual call.</div></td></tr>}</tbody></table> : active === 'Campaigns' ? <table className="data-table"><thead><tr><th>CAMPAIGN</th><th>STATUS</th><th>CREATED</th><th>ACTION</th></tr></thead><tbody>{rows.length ? rows.map(row => <tr key={row.id}><td><b>{row.name}</b></td><td><span className={`campaign-status ${row.status}`}><i />{campaignStatusLabel(row.status)}</span></td><td>{new Date(row.created_at).toLocaleDateString()}</td><td><button className="small-call-button" onClick={() => startCampaign(row)} disabled={row.status === 'in_progress'}>Start campaign</button><button className="small-call-button" onClick={() => openReport(row)}>Report</button><button className="small-call-button" onClick={() => duplicateFromRow(row)}>Duplicate</button><button className="small-call-button" onClick={() => onEditCampaign(row)}>Edit</button></td></tr>) : <tr><td colSpan="4"><div className="empty-state">No campaigns yet.</div></td></tr>}</tbody></table> : <div className="usage-report-grid"><div className="report-number"><span>Total minutes</span><strong>0</strong><small>Call usage will appear here after telephony is connected.</small></div><div className="report-number"><span>Estimated cost</span><strong>₹0</strong><small>Provider charges will be recorded automatically.</small></div><div className="report-number"><span>Events recorded</span><strong>{rows.length}</strong><small>Usage events from your connected providers.</small></div></div>}</div>{showContact && <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && setShowContact(false)}><div className="modal" role="dialog" aria-modal="true" aria-labelledby="contact-title"><button className="modal-close" onClick={() => setShowContact(false)}>×</button><div className="modal-kicker">INDIVIDUAL CONTACT</div><h2 id="contact-title">Add a new contact</h2><p className="muted">Add a person for an individual outbound call. Campaign assignment is optional.</p><form onSubmit={addContact}><label>Full name<input autoFocus value={contactName} onChange={event => setContactName(event.target.value)} placeholder="Candidate name" required /></label><label>Mobile number<input value={contactPhone} onChange={event => setContactPhone(event.target.value)} placeholder="+91 98765 43210" required /></label><label>Assign to campaign <span>Optional</span><select value={contactCampaign} onChange={event => setContactCampaign(event.target.value)}><option value="">Individual call — no campaign</option>{campaignOptions.map(campaign => <option key={campaign.id} value={campaign.id}>{campaign.name}</option>)}</select></label><div className="modal-actions"><button type="button" className="outline-button" onClick={() => setShowContact(false)}>Cancel</button><button className="primary-button" type="submit">Add contact <span>→</span></button></div></form></div></div>}{reportCampaign && <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && setReportCampaign(null)}><div className="modal report-modal" role="dialog" aria-modal="true" aria-labelledby="report-title"><button className="modal-close" onClick={() => setReportCampaign(null)}>×</button><div className="modal-kicker">CAMPAIGN REPORT</div><h2 id="report-title">{reportCampaign.name}</h2><p className="muted">Call progress and retry actions for this campaign.</p><div className="report-summary"><span><b>{reportRows.length}</b> contacts</span><span><b>{reportRows.filter(row => ['completed', 'shortlisted', 'rejected', 'under_review'].includes(row.status)).length}</b> completed</span><span><b>{reportRows.filter(row => row.status === 'failed').length}</b> failed</span></div><div className="report-list">{reportRows.length ? reportRows.map(row => { const lastCall = row.calls?.[0]; return <div className="report-row" key={row.id}><div><b>{row.full_name}</b><small>{row.mobile_number}</small></div><span className={`report-status ${row.status}`}>{row.status.replaceAll('_', ' ')}</span>{row.status === 'failed' && <button className="small-call-button" title="Retry this contact" onClick={() => startTestCall(row)}>☎ Retry call</button>}<small>{lastCall?.failure_reason || (lastCall?.status === 'failed' ? 'Provider reported call failure' : '')}</small></div> }) : <div className="empty-state">No contacts in this campaign yet.</div>}</div></div></div>}</div>
 }
 function LoginScreen({ email, setEmail, password, setPassword, error, onSubmit }) { return <main className="login-page"><div className="login-card"><div className="brand login-brand"><div className="brand-mark">K</div><div><div className="brand-name">Kural AI</div><div className="brand-sub">AI screening studio</div></div></div><div className="login-kicker">PRIVATE WORKSPACE</div><h1>Welcome back</h1><p className="muted">Sign in to manage your candidate screening campaigns.</p><form onSubmit={onSubmit} className="login-form"><label>Email address<input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@company.com" required /></label><label>Password<input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Your password" required /></label>{error && <div className="login-error">{error}</div>}<button className="primary-button" type="submit">Sign in <span>→</span></button></form><p className="login-note">Your account is managed through Supabase Auth.</p></div></main> }
 

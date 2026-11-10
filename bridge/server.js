@@ -74,7 +74,7 @@ async function speak(text, language) {
     body: JSON.stringify({ text, language_code: languageCodes[language] || 'en-IN', speaker: 'shubh', model: 'bulbul:v3', speech_sample_rate: 8000, output_audio_codec: 'wav' }),
   })
   const body = await response.json()
-  if (!response.ok || !body.audios?.[0]) throw new Error(body?.message || 'Sarvam TTS failed')
+  if (!response.ok || !body.audios?.[0]) throw new Error(body?.message || `Sarvam TTS failed (${response.status})`)
   return wavToMuLaw(body.audios[0]).toString('base64')
 }
 
@@ -176,12 +176,14 @@ const server = http.createServer((_request, response) => { response.writeHead(20
 const wss = new WebSocketServer({ server, path: '/stream' })
 
 wss.on('connection', (socket) => {
+  console.log('Plivo media stream connected')
   let session
   let sarvam
   socket.on('message', async (raw) => {
     const event = JSON.parse(raw.toString())
     if (event.event === 'start') {
       const metadata = parseHeaders(event.extra_headers)
+      console.log('Call stream started', { callId: metadata.callId, candidateId: metadata.candidateId, language: metadata.language })
       const candidate = await db(`/candidates?id=eq.${encodeURIComponent(metadata.candidateId)}&select=full_name`).catch(() => [])
       metadata.candidateName = candidate?.[0]?.full_name || 'you'
       session = new ScreeningSession(socket, metadata)
@@ -190,16 +192,26 @@ wss.on('connection', (socket) => {
       sarvam.on('message', (message) => {
         const result = JSON.parse(message.toString())
         const transcript = result?.data?.transcript || result?.transcript
-        if (transcript) session.handleTranscript(transcript).catch((error) => console.error('Screening error:', error.message))
+        if (transcript) {
+          console.log('Transcript received', { candidateId: metadata.candidateId, transcript })
+          session.handleTranscript(transcript).catch((error) => console.error('Screening error:', error.message))
+        }
       })
-      sarvam.on('open', () => session.start().catch((error) => console.error('Greeting error:', error.message)))
+      sarvam.on('open', () => {
+        console.log('Sarvam STT connected', { candidateId: metadata.candidateId })
+        session.start().catch((error) => console.error('Greeting error:', error.message))
+      })
       sarvam.on('error', (error) => console.error('Sarvam STT error:', error.message))
+      sarvam.on('close', (code, reason) => console.log('Sarvam STT closed', { code, reason: reason.toString() }))
     } else if (event.event === 'media' && sarvam?.readyState === WebSocket.OPEN) {
       const pcm = muLawToPcm16(Buffer.from(event.media.payload, 'base64'))
       sarvam.send(JSON.stringify({ audio: { data: pcm.toString('base64'), sample_rate: 8000, encoding: 'pcm_raw' } }))
     }
   })
-  socket.on('close', () => sarvam?.close())
+  socket.on('close', (code, reason) => {
+    console.log('Plivo media stream closed', { code, reason: reason.toString() })
+    sarvam?.close()
+  })
   socket.on('error', (error) => console.error('Plivo stream error:', error.message))
 })
 

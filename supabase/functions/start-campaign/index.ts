@@ -7,7 +7,7 @@ const corsHeaders = {
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
 const normalizeIndianNumber = (value: string) => {
   const digits = String(value || '').replace(/[^0-9]/g, '')
-  const normalized = digits.length === 10 ? `+91${digits}` : String(value || '').trim()
+  const normalized = digits.length === 10 ? `+91${digits}` : digits.length === 11 && digits.startsWith('0') ? `+91${digits.slice(1)}` : digits.length === 12 && digits.startsWith('91') ? `+${digits}` : String(value || '').trim()
   return /^\+91[6-9]\d{9}$/.test(normalized) ? normalized : null
 }
 
@@ -34,15 +34,12 @@ Deno.serve(async (request) => {
   const campaignResponse = await fetch(`${supabaseUrl}/rest/v1/campaigns?id=eq.${encodeURIComponent(campaignId)}&select=id,status`, { headers: dbHeaders })
   const campaigns = await campaignResponse.json()
   if (!campaignResponse.ok || !campaigns?.[0]) return json({ error: 'Campaign not found' }, 404)
-  if (['in_progress', 'completed'].includes(campaigns[0].status)) return json({ error: 'This campaign has already been started' }, 409)
+  if (campaigns[0].status === 'in_progress') return json({ error: 'This campaign is already in progress' }, 409)
 
-  const candidateResponse = await fetch(`${supabaseUrl}/rest/v1/candidates?campaign_id=eq.${encodeURIComponent(campaignId)}&status=eq.not_contacted&select=id,mobile_number`, { headers: dbHeaders })
+  const candidateResponse = await fetch(`${supabaseUrl}/rest/v1/candidates?campaign_id=eq.${encodeURIComponent(campaignId)}&status=in.(not_contacted,failed,no_answer,screening_incomplete)&select=id,mobile_number`, { headers: dbHeaders })
   const candidates = await candidateResponse.json()
   if (!candidateResponse.ok) return json({ error: 'Could not load campaign candidates' }, 500)
-  if (!candidates.length) {
-    await fetch(`${supabaseUrl}/rest/v1/campaigns?id=eq.${encodeURIComponent(campaignId)}`, { method: 'PATCH', headers: dbHeaders, body: JSON.stringify({ status: 'error' }) })
-    return json({ error: 'This campaign has no candidates ready to call' }, 400)
-  }
+  if (!candidates.length) return json({ ok: false, skipped: true, message: 'No new contacts were ready to call. Completed contacts were skipped.' })
 
   await fetch(`${supabaseUrl}/rest/v1/campaigns?id=eq.${encodeURIComponent(campaignId)}`, { method: 'PATCH', headers: dbHeaders, body: JSON.stringify({ status: 'in_progress' }) })
   let started = 0
@@ -74,5 +71,5 @@ Deno.serve(async (request) => {
     }
   }
   if (!started) await fetch(`${supabaseUrl}/rest/v1/campaigns?id=eq.${encodeURIComponent(campaignId)}`, { method: 'PATCH', headers: dbHeaders, body: JSON.stringify({ status: 'error' }) })
-  return json({ ok: started > 0, started, failed, message: `${started} call(s) started${failed ? `, ${failed} failed` : ''}.` })
+  return json({ ok: started > 0, started, failed, message: `${started} call(s) started${failed ? `, ${failed} failed` : ''}. Completed contacts were skipped.` })
 })

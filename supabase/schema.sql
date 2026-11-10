@@ -109,6 +109,19 @@ create index if not exists screening_questions_campaign_id_idx on public.screeni
 create index if not exists calls_candidate_id_idx on public.calls(candidate_id);
 create index if not exists usage_events_created_at_idx on public.usage_events(created_at);
 
+-- One provider configuration per workspace owner for the current MVP.
+-- Secret values stay in server-side Supabase secrets; this table stores only safe metadata.
+create table if not exists public.workspace_settings (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null unique references auth.users(id) on delete cascade,
+  telephony_provider text not null default 'plivo_sarvam' check (telephony_provider in ('plivo_sarvam', 'sarvam_voice_agents')),
+  phone_number text,
+  plivo_ready boolean not null default false,
+  sarvam_ready boolean not null default false,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 -- Protect every table from unauthenticated access.
 alter table public.campaigns enable row level security;
 alter table public.candidates enable row level security;
@@ -116,6 +129,7 @@ alter table public.screening_questions enable row level security;
 alter table public.calls enable row level security;
 alter table public.candidate_answers enable row level security;
 alter table public.usage_events enable row level security;
+alter table public.workspace_settings enable row level security;
 
 -- Internal MVP policy: signed-in team members can work with the shared workspace.
 -- We will replace this with workspace-level policies before SaaS customer onboarding.
@@ -136,3 +150,6 @@ create policy "signed in team can manage answers" on public.candidate_answers fo
 
 drop policy if exists "signed in team can manage usage" on public.usage_events;
 create policy "signed in team can manage usage" on public.usage_events for all to authenticated using (true) with check (true);
+
+drop policy if exists "signed in user can manage own workspace settings" on public.workspace_settings;
+create policy "signed in user can manage own workspace settings" on public.workspace_settings for all to authenticated using (user_id = auth.uid()) with check (user_id = auth.uid());

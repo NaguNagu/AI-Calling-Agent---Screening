@@ -22,7 +22,7 @@ Deno.serve(async (request) => {
   const { to_number: toNumber, candidate_id: candidateId } = await request.json()
   if (!toNumber) return json({ error: 'to_number is required' }, 400)
   const digits = String(toNumber).replace(/[^0-9]/g, '')
-  const normalizedNumber = digits.length === 10 ? `+91${digits}` : String(toNumber).trim()
+  const normalizedNumber = digits.length === 10 ? `+91${digits}` : digits.length === 11 && digits.startsWith('0') ? `+91${digits.slice(1)}` : digits.length === 12 && digits.startsWith('91') ? `+${digits}` : String(toNumber).trim()
   if (!/^\+91[6-9]\d{9}$/.test(normalizedNumber)) return json({ error: 'Please use a valid Indian mobile number' }, 400)
 
   const authId = Deno.env.get('PLIVO_AUTH_ID')
