@@ -1,368 +1,232 @@
-import { StrictMode, useEffect, useState } from 'react'
+import { StrictMode, useCallback, useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import './styles.css'
 import { isSupabaseConfigured, supabase } from './lib/supabase'
+import Icon from './components/Icon'
+import { Avatar, Button, Field, Modal, Toast, useConfirm } from './components/ui'
+import CampaignForm from './components/CampaignForm'
+import CampaignReport from './components/CampaignReport'
+import ContactDrawer from './components/ContactDrawer'
+import Overview from './pages/Overview'
+import Campaigns from './pages/Campaigns'
+import Contacts from './pages/Contacts'
+import Usage from './pages/Usage'
+import Settings from './pages/Settings'
+import Login from './pages/Login'
+import { CALLABLE, displayName, needsReview } from './lib/format'
 
-const campaigns = [
-  { name: 'Senior Sales Executive', location: 'Chennai · F2F', candidates: 84, completed: 56, review: 12, status: 'Active', minutes: '248m', tone: 'blue', primary_language: 'Tamil' },
-  { name: 'Customer Support Associate', location: 'Bengaluru · Virtual', candidates: 42, completed: 42, review: 7, status: 'Completed', minutes: '171m', tone: 'violet', primary_language: 'Hindi' },
-  { name: 'Warehouse Supervisor', location: 'Coimbatore · F2F', candidates: 27, completed: 11, review: 3, status: 'Active', minutes: '49m', tone: 'amber', primary_language: 'English' },
+const NAV = [
+  ['Overview', 'dashboard'],
+  ['Campaigns', 'megaphone'],
+  ['Contacts', 'users'],
+  ['Usage', 'chart'],
 ]
 
-const candidates = [
-  { initials: 'AK', name: 'Arun Kumar', role: 'Senior Sales Executive', lang: 'Tamil', status: 'Needs review', date: 'Today, 10:42 AM', duration: '06:18', score: 82, color: 'teal' },
-  { initials: 'PS', name: 'Priya Sharma', role: 'Customer Support Associate', lang: 'Hindi', status: 'Shortlisted', date: 'Today, 09:28 AM', duration: '05:44', score: 91, color: 'purple' },
-  { initials: 'RM', name: 'Rahul Menon', role: 'Senior Sales Executive', lang: 'English', status: 'Completed', date: 'Yesterday, 04:15 PM', duration: '04:09', score: 76, color: 'orange' },
-  { initials: 'SN', name: 'Sneha Nair', role: 'Warehouse Supervisor', lang: 'English', status: 'No answer', date: 'Yesterday, 03:02 PM', duration: '—', score: null, color: 'pink' },
-]
+const emptyData = { campaigns: [], candidates: [], usage: [] }
 
-function Icon({ children }) { return <span className="icon" aria-hidden="true">{children}</span> }
+function useWorkspaceData(session) {
+  const [data, setData] = useState(emptyData)
+  const [status, setStatus] = useState('loading')
+  const [error, setError] = useState('')
 
-function App() {
-  const [active, setActive] = useState('Overview')
-  const [showCampaign, setShowCampaign] = useState(false)
-  const [editingCampaign, setEditingCampaign] = useState(null)
-  const [campaignName, setCampaignName] = useState('')
-  const [primaryLanguage, setPrimaryLanguage] = useState('English')
-  const [jdText, setJdText] = useState('')
-  const [companyName, setCompanyName] = useState('')
-  const [companyDisclosure, setCompanyDisclosure] = useState('if_asked')
-  const [questionText, setQuestionText] = useState('')
-  const [candidateName, setCandidateName] = useState('')
-  const [candidatePhone, setCandidatePhone] = useState('')
-  const [candidateCsv, setCandidateCsv] = useState([])
-  const [campaignContacts, setCampaignContacts] = useState([])
-  const [showContactList, setShowContactList] = useState(false)
-  const [notice, setNotice] = useState('')
-  const [connectionState, setConnectionState] = useState(isSupabaseConfigured ? 'checking' : 'missing')
-  const [campaignList, setCampaignList] = useState(campaigns)
-  const [dashboardContacts, setDashboardContacts] = useState([])
-  const [dashboardUsage, setDashboardUsage] = useState([])
-  const [session, setSession] = useState(null)
-  const [authLoading, setAuthLoading] = useState(Boolean(supabase))
-  const [loginEmail, setLoginEmail] = useState('')
-  const [loginPassword, setLoginPassword] = useState('')
-  const [loginError, setLoginError] = useState('')
-
-  const signIn = async (event) => {
-    event.preventDefault()
-    setLoginError('')
-    const { error } = await supabase.auth.signInWithPassword({ email: loginEmail, password: loginPassword })
-    if (error) setLoginError(error.message)
-  }
-
-  useEffect(() => {
-    if (!supabase) return
-    supabase.auth.getSession().then(({ data }) => {
-      setSession(data.session)
-      setAuthLoading(false)
-    })
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, nextSession) => setSession(nextSession))
-    return () => listener.subscription.unsubscribe()
-  }, [])
-
-  useEffect(() => {
-    if (!supabase || !session) return
-    Promise.all([
-      supabase.from('campaigns').select('id, name, status, primary_language, job_location, created_at').order('created_at', { ascending: false }),
-      supabase.from('candidates').select('id, campaign_id, full_name, mobile_number, status, preferred_language, recruiter_decision, created_at, campaigns(name), calls(id, status, language, started_at, duration_seconds, created_at)').order('created_at', { ascending: false }),
-      supabase.from('usage_events').select('id, campaign_id, minutes, estimated_cost, created_at').order('created_at', { ascending: false }),
-    ]).then(([campaignResult, candidateResult, usageResult]) => {
-      if (campaignResult.error || candidateResult.error || usageResult.error) {
-        setConnectionState('error')
-        return
-      }
-      const campaignRows = campaignResult.data || []
-      const candidateRows = candidateResult.data || []
-      const usageRows = usageResult.data || []
-      setConnectionState('connected')
-      setDashboardContacts(candidateRows)
-      setDashboardUsage(usageRows)
-      setCampaignList(campaignRows.map(item => {
-        const campaignContacts = candidateRows.filter(candidate => candidate.campaign_id === item.id)
-        const completed = campaignContacts.filter(candidate => ['completed', 'under_review', 'shortlisted', 'rejected'].includes(candidate.status)).length
-        const review = campaignContacts.filter(candidate => ['under_review', 'screening_incomplete'].includes(candidate.status) || candidate.recruiter_decision === 'needs_review').length
-        const campaignMinutes = usageRows.filter(event => event.campaign_id === item.id).reduce((total, event) => total + Number(event.minutes || 0), 0)
-        return { name: item.name, location: item.job_location || 'New campaign', candidates: campaignContacts.length, completed, review, status: item.status === 'in_progress' ? 'In progress' : item.status === 'completed' ? 'Completed' : item.status === 'error' ? 'Error' : 'Created', minutes: `${campaignMinutes.toFixed(2).replace(/\.00$/, '')}m`, tone: 'blue', primary_language: item.primary_language || 'English' }
-      }))
-    })
+  const reload = useCallback(async () => {
+    if (!session) return
+    const [campaigns, candidates, usage] = await Promise.all([
+      supabase.from('campaigns').select('id, name, status, primary_language, job_location, company_name, caller_name, created_at').order('created_at', { ascending: false }),
+      supabase.from('candidates').select('id, campaign_id, full_name, mobile_number, status, preferred_language, recruiter_decision, created_at, campaigns(name, primary_language), calls(id, status, language, duration_seconds, created_at)').order('created_at', { ascending: false }),
+      supabase.from('usage_events').select('id, campaign_id, call_id, provider, minutes, estimated_cost, created_at').order('created_at', { ascending: false }),
+    ])
+    const failed = [campaigns, candidates, usage].find(result => result.error)
+    if (failed) { setError(failed.error.message); setStatus('error'); return }
+    setData({ campaigns: campaigns.data || [], candidates: candidates.data || [], usage: usage.data || [] })
+    setStatus('ready')
   }, [session])
 
-  const screenedCount = dashboardContacts.filter(candidate => ['completed', 'under_review', 'shortlisted', 'rejected'].includes(candidate.status)).length
-  const reviewCount = dashboardContacts.filter(candidate => ['under_review', 'screening_incomplete'].includes(candidate.status) || candidate.recruiter_decision === 'needs_review').length
-  const minutesUsed = dashboardUsage.reduce((total, event) => total + Number(event.minutes || 0), 0)
-  const usagePercent = Math.min(100, Math.round(minutesUsed / 1000 * 100))
-  const recentContacts = dashboardContacts.slice(0, 4).map(candidate => {
-    const latestCall = candidate.calls?.[0]
-    const initials = candidate.full_name.split(/\s+/).map(part => part[0]).join('').slice(0, 2).toUpperCase()
-    const duration = latestCall?.duration_seconds ? `${String(Math.floor(latestCall.duration_seconds / 60)).padStart(2, '0')}:${String(latestCall.duration_seconds % 60).padStart(2, '0')}` : '—'
-    return { initials, name: candidate.full_name, role: candidate.campaigns?.name || 'Individual call', lang: candidate.preferred_language || latestCall?.language || 'Not selected', status: candidate.status.replaceAll('_', ' '), date: new Date(candidate.created_at).toLocaleString(), duration, score: null, color: 'teal' }
-  })
+  useEffect(() => { reload() }, [reload])
 
-  const openNewCampaign = () => {
-    setEditingCampaign(null)
-    setCampaignName('')
-    setPrimaryLanguage('English')
-    setJdText('')
-    setCompanyName('')
-    setCompanyDisclosure('if_asked')
-    setQuestionText('')
-    setCandidateName('')
-    setCandidatePhone('')
-    setCandidateCsv([])
-    setCampaignContacts([])
-    setShowContactList(false)
-    setShowCampaign(true)
-  }
+  // While a call is live, refresh every 10 seconds so statuses update on their own.
+  const anyCalling = data.candidates.some(c => c.status === 'calling')
+  useEffect(() => {
+    if (!anyCalling) return
+    const timer = setInterval(reload, 10000)
+    return () => clearInterval(timer)
+  }, [anyCalling, reload])
 
-  const openEditCampaign = async (campaign) => {
-    const { data, error } = await supabase.from('campaigns').select('id, name, primary_language, jd_text, company_name, company_disclosure, status').eq('id', campaign.id).single()
-    if (error) { setNotice(`Could not open campaign: ${error.message}`); return }
-    const { data: questions } = await supabase.from('screening_questions').select('question_text').eq('campaign_id', campaign.id).eq('is_active', true).order('sort_order')
-    const { data: contacts } = await supabase.from('candidates').select('id, full_name, mobile_number, status').eq('campaign_id', campaign.id).order('created_at')
-    setEditingCampaign(data)
-    setCampaignName(data.name || '')
-    setPrimaryLanguage(data.primary_language || 'English')
-    setJdText(data.jd_text || '')
-    setCompanyName(data.company_name || '')
-    setCompanyDisclosure(data.company_disclosure || 'if_asked')
-    setQuestionText((questions || []).map(question => question.question_text).join('\n'))
-    setCampaignContacts(contacts || [])
-    setShowContactList(false)
-    setShowCampaign(true)
-  }
+  return { data, status, error, reload }
+}
 
-  const addCampaignContact = () => {
-    if (!candidateName.trim() || !candidatePhone.trim()) return
-    setCampaignContacts(current => [...current, { full_name: candidateName.trim(), mobile_number: candidatePhone.trim(), status: 'not_contacted' }])
-    setCandidateName('')
-    setCandidatePhone('')
-    setShowContactList(true)
-  }
-
-  const updateCampaignContact = (index, field, value) => setCampaignContacts(current => current.map((contact, contactIndex) => contactIndex === index ? { ...contact, [field]: value } : contact))
-
-  const saveCampaignContact = async (contact) => {
-    if (!contact.id) return
-    const { error } = await supabase.from('candidates').update({ full_name: contact.full_name, mobile_number: contact.mobile_number }).eq('id', contact.id)
-    if (error) setNotice(`Could not update contact: ${error.message}`)
-  }
-
-  const deleteCampaignContact = async (contact, index) => {
-    if (contact.id) {
-      const { error } = await supabase.from('candidates').delete().eq('id', contact.id)
-      if (error) { setNotice(`Could not delete contact: ${error.message}`); return }
-    }
-    setCampaignContacts(current => current.filter((_, contactIndex) => contactIndex !== index))
-  }
-
-  const createCampaign = async (event) => {
+function AddContactModal({ campaigns, onClose, onSaved, notify }) {
+  const [name, setName] = useState('')
+  const [phone, setPhone] = useState('')
+  const [campaignId, setCampaignId] = useState('')
+  const [saving, setSaving] = useState(false)
+  const save = async (event) => {
     event.preventDefault()
-    if (!campaignName.trim()) return
-    if (supabase) {
-      const campaignPayload = { name: campaignName.trim(), jd_text: jdText.trim(), primary_language: primaryLanguage, company_name: companyName.trim() || null, company_disclosure: companyDisclosure, status: editingCampaign?.status || 'created' }
-      const campaignQuery = editingCampaign
-        ? supabase.from('campaigns').update(campaignPayload).eq('id', editingCampaign.id).select('id, name, status, primary_language').single()
-        : supabase.from('campaigns').insert(campaignPayload).select('id, name, status, primary_language').single()
-      const { data, error } = await campaignQuery
-      if (error) {
-        setNotice(`Could not save campaign: ${error.message}`)
-        return
+    setSaving(true)
+    const { error } = await supabase.from('candidates').insert({ full_name: name.trim(), mobile_number: phone.trim(), campaign_id: campaignId || null })
+    setSaving(false)
+    if (error) { notify({ tone: 'danger', text: `Contact wasn’t saved: ${error.message}` }); return }
+    onSaved({ text: `${name.trim()} was added.` })
+  }
+  return (
+    <Modal title="Add a contact" kicker="New contact" description="Add one person to call. You can put them in a campaign or call them on their own." onClose={onClose}
+      footer={<><Button onClick={onClose}>Cancel</Button><Button variant="primary" type="submit" form="contact-form" disabled={saving || !name.trim() || !phone.trim()}>{saving ? 'Saving…' : 'Add contact'}</Button></>}>
+      <form id="contact-form" className="form" onSubmit={save}>
+        <Field label="Full name"><input autoFocus value={name} onChange={e => setName(e.target.value)} placeholder="Candidate name" required /></Field>
+        <Field label="Mobile number" hint="Indian mobile number"><input value={phone} onChange={e => setPhone(e.target.value)} placeholder="98765 43210" required /></Field>
+        <Field label="Campaign" hint="Optional">
+          <select value={campaignId} onChange={e => setCampaignId(e.target.value)}>
+            <option value="">No campaign (individual call)</option>
+            {campaigns.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+        </Field>
+      </form>
+    </Modal>
+  )
+}
+
+function Workspace({ session }) {
+  const user = session.user
+  const { data, status, error, reload } = useWorkspaceData(session)
+  const [page, setPage] = useState('Overview')
+  const [pageOptions, setPageOptions] = useState({})
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [toast, setToast] = useState(null)
+  const [formCampaign, setFormCampaign] = useState(null)
+  const [reportCampaign, setReportCampaign] = useState(null)
+  const [drawerContact, setDrawerContact] = useState(null)
+  const [addingContact, setAddingContact] = useState(false)
+  const [confirmDialog, confirm] = useConfirm()
+  const notify = useCallback((next) => setToast(next), [])
+  const closeToast = useCallback(() => setToast(null), [])
+  const closeForm = useCallback(() => setFormCampaign(null), [])
+
+  const go = (next, options = {}) => { setPage(next); setPageOptions(options); setMenuOpen(false); window.scrollTo(0, 0) }
+  const reviewCount = data.candidates.filter(needsReview).length
+
+  const actions = {
+    editCampaign: (campaign) => setFormCampaign(campaign || {}),
+    openReport: (campaign) => setReportCampaign(campaign),
+    openContact: (contact) => setDrawerContact(contact),
+    addContact: () => setAddingContact(true),
+
+    callContact: async (contact) => {
+      const ok = await confirm({ title: `Call ${contact.full_name}?`, message: `Kural AI will phone ${contact.mobile_number} now and run the screening questions. This is a real call.`, confirmLabel: 'Call now', icon: 'phone' })
+      if (ok !== 'confirm') return
+      notify({ text: `Calling ${contact.full_name}…` })
+      const { error: callError } = await supabase.functions.invoke('start-call', { body: { to_number: contact.mobile_number, candidate_id: contact.id } })
+      notify(callError ? { tone: 'danger', text: `The call didn’t start: ${callError.message}` } : { text: `Call started to ${contact.full_name}. Status updates automatically.` })
+      if (!callError) await supabase.from('candidates').update({ status: 'calling' }).eq('id', contact.id)
+      reload()
+    },
+
+    startCampaign: async (campaign) => {
+      const contacts = data.candidates.filter(c => c.campaign_id === campaign.id)
+      const ready = contacts.filter(c => CALLABLE.includes(c.status)).length
+      const ok = await confirm({ title: `Start calling for “${campaign.name}”?`, message: `Kural AI will call ${ready} contact${ready === 1 ? '' : 's'} who haven’t been screened yet. People who are already screened are skipped.`, confirmLabel: `Call ${ready} contact${ready === 1 ? '' : 's'}`, icon: 'play' })
+      if (ok !== 'confirm') return
+      // A campaign can be left marked "in progress" when nobody is actually being called. Clear that first.
+      if (campaign.status === 'in_progress' && !contacts.some(c => c.status === 'calling')) {
+        await supabase.from('campaigns').update({ status: 'created' }).eq('id', campaign.id)
       }
-      const manualCandidate = candidateName.trim() && candidatePhone.trim() ? [{ full_name: candidateName.trim(), mobile_number: candidatePhone.trim() }] : []
-      const importedContacts = [...campaignContacts.filter(contact => !contact.id), ...manualCandidate, ...candidateCsv.map(candidate => ({ ...candidate }))].map(contact => ({ campaign_id: data.id, full_name: contact.full_name, mobile_number: contact.mobile_number }))
-      if (importedContacts.length) await supabase.from('candidates').insert(importedContacts)
-      const questions = questionText.split('\n').map((question, index) => question.trim() ? ({ campaign_id: data.id, question_text: question.trim(), sort_order: index, required: false }) : null).filter(Boolean)
-      if (editingCampaign) await supabase.from('screening_questions').delete().eq('campaign_id', data.id)
-      if (questions.length) await supabase.from('screening_questions').insert(questions)
-      setCampaignList(current => editingCampaign ? current.map(item => item.name === editingCampaign.name ? { ...item, name: data.name, status: campaignStatusLabel(data.status), primary_language: data.primary_language } : item) : [{ name: data.name, location: 'New campaign', candidates: 0, completed: 0, review: 0, status: 'Created', minutes: '0m', tone: 'blue', primary_language: data.primary_language }, ...current])
-    }
-    setShowCampaign(false)
-    setNotice(`Campaign “${campaignName}” is ready for contacts.`)
-    setCampaignName('')
-    setPrimaryLanguage('English')
-    setJdText('')
-    setCompanyName('')
-    setQuestionText('')
-    setCandidateName('')
-    setCandidatePhone('')
-    setCandidateCsv([])
-    setEditingCampaign(null)
-    setTimeout(() => setNotice(''), 3500)
+      notify({ text: `Starting “${campaign.name}”…` })
+      const { data: result, error: startError } = await supabase.functions.invoke('start-campaign', { body: { campaign_id: campaign.id } })
+      notify(startError ? { tone: 'danger', text: `The campaign didn’t start: ${startError.message}` } : { tone: result?.ok === false && !result?.skipped ? 'danger' : 'success', text: result?.message || 'Campaign started.' })
+      reload()
+    },
+
+    duplicateCampaign: async (campaign) => {
+      const choice = await confirm({ title: `Duplicate “${campaign.name}”?`, message: 'The copy gets the same job details and questions. Do you also want to copy its contacts? Copied contacts start as “Not contacted”.', confirmLabel: 'Copy with contacts', secondaryLabel: 'Settings only', icon: 'copy' })
+      if (!choice) return
+      const { data: source, error: e1 } = await supabase.from('campaigns').select('name, primary_language, jd_text, job_location, company_name, company_disclosure, caller_name').eq('id', campaign.id).single()
+      if (e1) { notify({ tone: 'danger', text: `Couldn’t duplicate: ${e1.message}` }); return }
+      const { data: copy, error: e2 } = await supabase.from('campaigns').insert({ ...source, name: `${source.name} (copy)`, status: 'created' }).select('id, name').single()
+      if (e2) { notify({ tone: 'danger', text: `Couldn’t duplicate: ${e2.message}` }); return }
+      const { data: questions } = await supabase.from('screening_questions').select('question_text, required, sort_order, is_active').eq('campaign_id', campaign.id)
+      if (questions?.length) await supabase.from('screening_questions').insert(questions.map(q => ({ ...q, campaign_id: copy.id })))
+      if (choice === 'confirm') {
+        const { data: people } = await supabase.from('candidates').select('full_name, mobile_number').eq('campaign_id', campaign.id)
+        if (people?.length) await supabase.from('candidates').insert(people.map(p => ({ ...p, campaign_id: copy.id, status: 'not_contacted' })))
+      }
+      notify({ text: `“${copy.name}” was created.` })
+      reload()
+    },
   }
 
-  const readCandidateCsv = (event) => {
-    const file = event.target.files?.[0]
-    if (!file) return
-    const reader = new FileReader()
-    reader.onload = () => {
-      const lines = String(reader.result).split(/\r?\n/).map(line => line.trim()).filter(Boolean)
-      if (lines.length < 2) return
-      const headers = lines[0].split(',').map(header => header.trim().toLowerCase().replaceAll(' ', '_'))
-      const nameIndex = headers.indexOf('full_name') >= 0 ? headers.indexOf('full_name') : headers.indexOf('name')
-      const phoneIndex = headers.indexOf('mobile_number') >= 0 ? headers.indexOf('mobile_number') : headers.indexOf('mobile')
-      if (nameIndex < 0 || phoneIndex < 0) return
-      setCandidateCsv(lines.slice(1).map(line => line.split(',')).map(values => ({ full_name: values[nameIndex]?.trim(), mobile_number: values[phoneIndex]?.trim() })).filter(candidate => candidate.full_name && candidate.mobile_number))
-    }
-    reader.readAsText(file)
-  }
-
-  const duplicateCampaign = async (campaign, copyContacts) => {
-    const { data: source, error } = await supabase.from('campaigns').select('id, name, primary_language, jd_text, company_name, company_disclosure').eq('id', campaign.id).single()
-    if (error) { setNotice(`Could not duplicate campaign: ${error.message}`); return null }
-    const { data: copy, error: copyError } = await supabase.from('campaigns').insert({ name: `${source.name} (Copy)`, primary_language: source.primary_language, jd_text: source.jd_text, company_name: source.company_name, company_disclosure: source.company_disclosure, status: 'created' }).select('id, name, status, primary_language, created_at').single()
-    if (copyError) { setNotice(`Could not duplicate campaign: ${copyError.message}`); return null }
-    const { data: questions } = await supabase.from('screening_questions').select('question_text, required, sort_order, is_active').eq('campaign_id', source.id)
-    if (questions?.length) await supabase.from('screening_questions').insert(questions.map(question => ({ ...question, campaign_id: copy.id })))
-    if (copyContacts) {
-      const { data: contacts } = await supabase.from('candidates').select('full_name, mobile_number').eq('campaign_id', source.id)
-      if (contacts?.length) await supabase.from('candidates').insert(contacts.map(contact => ({ ...contact, campaign_id: copy.id, status: 'not_contacted' })))
-    }
-    setCampaignList(current => [{ name: copy.name, location: 'New campaign', candidates: 0, completed: 0, review: 0, status: 'Created', minutes: '0m', tone: 'blue', primary_language: copy.primary_language }, ...current])
-    setNotice(`Campaign “${copy.name}” was created${copyContacts ? ' with copied contacts' : ''}.`)
-    return copy
-  }
-
-  if (supabase && authLoading) return <div className="auth-loading">Opening your secure workspace…</div>
-  if (supabase && !session) return <LoginScreen email={loginEmail} setEmail={setLoginEmail} password={loginPassword} setPassword={setLoginPassword} error={loginError} onSubmit={signIn} />
+  const signOut = () => supabase.auth.signOut()
 
   return (
-    <div className="app-shell">
-      <aside className="sidebar">
-        <div className="brand"><div className="brand-mark">K</div><div><div className="brand-name">Kural AI</div><div className="brand-sub">AI screening studio</div></div></div>
-        <div className="workspace-label">WORKSPACE</div>
-        <button className="workspace-switch"><span className="workspace-dot">A</span><span className="workspace-copy"><b>Arcline Recruitment</b><small>Internal workspace</small></span><span className="chevron">⌄</span></button>
-        <nav className="nav-list" aria-label="Main navigation">
-          {[["Overview", '◈'], ["Campaigns", '▣'], ["Contacts", '♙'], ["Usage", '◒']].map(([item, icon]) => <button key={item} className={`nav-item ${active === item ? 'selected' : ''}`} onClick={() => setActive(item)}><Icon>{icon}</Icon>{item}</button>)}
-        </nav>
-        <div className="sidebar-bottom"><button className={`nav-item ${active === 'Settings' ? 'selected' : ''}`} onClick={() => setActive('Settings')}><Icon>⚙</Icon>Settings</button><div className="help-card"><div className="help-icon">?</div><div><b>Need a hand?</b><small>Read the quick guide</small></div><span>↗</span></div><div className="user-row"><div className="avatar avatar-small">NS</div><div><b>Nagesh S.</b><small>Admin</small></div><span className="more">•••</span></div></div>
-      </aside>
-
-      <main className="main-content">
-        <header className="topbar"><div className="breadcrumb">Workspace <span>/</span> {active}</div><div className="top-actions"><span className={`connection-badge ${connectionState}`}><i />{connectionState === 'connected' ? 'Supabase connected' : connectionState === 'checking' ? 'Connecting…' : 'Demo mode'}</span><button className="icon-button" aria-label="Notifications">♢<span className="notification-dot" /></button><div className="avatar">NS</div></div></header>
-        <div className="content-wrap">
-          {notice && <div className="toast"><span>✓</span>{notice}</div>}
-          <div className="page-heading"><div><p className="eyebrow">SUNDAY, AUGUST 30, 2026</p><h1>Good afternoon, Nagesh <span className="wave">✦</span></h1><p className="muted">Here’s what’s happening with your contact screening today.</p></div>{active !== 'Contacts' && active !== 'Settings' && <button className="primary-button" onClick={openNewCampaign}><span>＋</span> New campaign</button>}</div>
-
-          {active === 'Overview' ? <>
-          <section className="metric-grid" aria-label="Screening overview">
-            <Metric label="Active campaigns" value={campaignList.filter(campaign => ['Active', 'In progress'].includes(campaign.status)).length} detail="From your live campaigns" icon="▣" accent="blue" />
-            <Metric label="Contacts screened" value={screenedCount} detail="Based on screening status" icon="♙" accent="purple" />
-            <Metric label="Minutes used" value={minutesUsed.toFixed(2).replace(/\.00$/, '')} detail="From recorded call usage" icon="◷" accent="orange" progress={usagePercent} />
-            <Metric label="Need your review" value={reviewCount} detail="Across all campaigns" icon="⌁" accent="red" />
-          </section>
-
-          <div className="section-heading"><div><h2>Campaigns</h2><p className="muted">Monitor your active screening campaigns.</p></div><button className="text-button" onClick={() => setActive('Campaigns')}>View all <span>→</span></button></div>
-          <section className="campaign-grid">{campaignList.map(campaign => <CampaignCard key={campaign.name} campaign={campaign} />)}<button className="new-card" onClick={() => setShowCampaign(true)}><div className="new-card-icon">＋</div><b>Create a campaign</b><span>Upload a JD and start screening</span></button></section>
-
-          <section className="lower-grid"><div className="panel"><div className="panel-heading"><div><h2>Recent contact activity</h2><p className="muted">The latest screening results from your team.</p></div><button className="filter-button">All campaigns　⌄</button></div><div className="table-wrap"><table><thead><tr><th>CANDIDATE</th><th>CAMPAIGN</th><th>LANGUAGE</th><th>STATUS</th><th>ADDED</th><th>SCORE</th></tr></thead><tbody>{recentContacts.length ? recentContacts.map(candidate => <tr key={candidate.name}><td><div className="candidate-cell"><div className={`avatar ${candidate.color}`}>{candidate.initials}</div><div><b>{candidate.name}</b><small>{candidate.role}</small></div></div></td><td className="role-cell">{candidate.role}</td><td><span className="language"><span className="language-dot" />{candidate.lang}</span></td><td><Status label={candidate.status} /></td><td className="date-cell">{candidate.date}<small>{candidate.duration}</small></td><td><span className="dash">—</span></td></tr>) : <tr><td colSpan="6"><div className="empty-state">Candidate activity will appear here after contacts are added.</div></td></tr>}</tbody></table></div></div><div className="panel usage-panel"><div className="panel-heading"><div><h2>Usage this month</h2><p className="muted">Your current plan allowance.</p></div><button className="more-button">•••</button></div><div className="usage-total"><strong>{minutesUsed.toFixed(2).replace(/\.00$/, '')}</strong><span>minutes used</span></div><div className="usage-progress"><div style={{ width: `${usagePercent}%` }} /></div><div className="usage-labels"><span>0 min</span><span>1,000 min</span></div><div className="usage-breakdown"><div><span className="legend-dot teal-dot" /><span>Recorded usage</span><b>{minutesUsed.toFixed(2).replace(/\.00$/, '')} min</b></div><div><span className="legend-dot light-dot" /><span>Unrecorded</span><b>—</b></div></div><button className="outline-button" onClick={() => setActive('Usage')}>Open usage report <span>→</span></button></div></section>
-          </> : active === 'Settings' ? <SettingsPage session={session} /> : <DataPage active={active} campaignList={campaignList} onNewCampaign={openNewCampaign} onEditCampaign={openEditCampaign} onDuplicateCampaign={duplicateCampaign} />}
+    <div className="shell">
+      <aside className={`sidebar ${menuOpen ? 'open' : ''}`}>
+        <div className="sidebar-top">
+          <div className="brand"><span className="brand-mark">K</span><span><b>Kural AI</b><small>AI screening studio</small></span></div>
+          <button className="icon-btn sidebar-close" onClick={() => setMenuOpen(false)} aria-label="Close menu"><Icon name="x" size={16} /></button>
         </div>
+        <Button variant="primary" icon="plus" className="full sidebar-cta" onClick={() => { setMenuOpen(false); actions.editCampaign() }}>New campaign</Button>
+        <nav className="nav" aria-label="Main">
+          {NAV.map(([name, icon]) => (
+            <button key={name} className={`nav-item ${page === name ? 'active' : ''}`} onClick={() => go(name)} aria-current={page === name ? 'page' : undefined}>
+              <Icon name={icon} size={18} />{name}
+              {name === 'Contacts' && reviewCount > 0 && <span className="nav-count" title="Waiting for your review">{reviewCount}</span>}
+            </button>
+          ))}
+        </nav>
+        <div className="sidebar-bottom">
+          <button className={`nav-item ${page === 'Settings' ? 'active' : ''}`} onClick={() => go('Settings')}><Icon name="settings" size={18} />Settings</button>
+          <div className="user">
+            <Avatar name={displayName(user)} size="sm" />
+            <div className="user-text"><b>{displayName(user)}</b><small>{user.email}</small></div>
+            <button className="icon-btn" onClick={signOut} aria-label="Sign out" title="Sign out"><Icon name="logout" size={16} /></button>
+          </div>
+        </div>
+      </aside>
+      {menuOpen && <div className="scrim" onClick={() => setMenuOpen(false)} />}
+
+      <main className="main">
+        <header className="mobile-bar">
+          <button className="icon-btn" onClick={() => setMenuOpen(true)} aria-label="Open menu"><Icon name="menu" size={18} /></button>
+          <div className="brand brand-sm"><span className="brand-mark">K</span><b>Kural AI</b></div>
+          <Avatar name={displayName(user)} size="sm" />
+        </header>
+
+        {status === 'error' ? (
+          <div className="page"><div className="card error-card"><Icon name="alert" size={22} /><div><b>We couldn’t load your workspace</b><p className="muted">{error}</p></div><Button icon="refresh" onClick={reload}>Try again</Button></div></div>
+        ) : status === 'loading' ? (
+          <div className="page"><div className="skeleton-head" /><div className="stats">{[1, 2, 3, 4].map(i => <div key={i} className="stat skeleton" />)}</div><div className="card skeleton skeleton-block" /></div>
+        ) : page === 'Overview' ? <Overview user={user} data={data} go={go} actions={actions} />
+          : page === 'Campaigns' ? <Campaigns data={data} actions={actions} />
+          : page === 'Contacts' ? <Contacts data={data} actions={actions} initialFilter={pageOptions.filter} />
+          : page === 'Usage' ? <Usage data={data} />
+          : <Settings user={user} notify={notify} onSignOut={signOut} />}
       </main>
 
-      {showCampaign && <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && setShowCampaign(false)}><div className="modal modal-wide" role="dialog" aria-modal="true" aria-labelledby="modal-title"><button className="modal-close" onClick={() => setShowCampaign(false)}>×</button><div className="modal-kicker">CAMPAIGN SETUP</div><h2 id="modal-title">Create a campaign</h2><p className="muted">Set up the job, questions, and contacts before making calls.</p><form onSubmit={createCampaign}><div className="form-grid"><label>Campaign name <span>Required · becomes the job name</span><input autoFocus value={campaignName} onChange={e => setCampaignName(e.target.value)} placeholder="e.g. Senior Sales Executive" /></label><label>Company name<input value={companyName} onChange={e => setCompanyName(e.target.value)} placeholder="Your company or consultancy" /></label></div><div className="form-grid"><label>Primary call language <span>Required</span><select value={primaryLanguage} onChange={e => setPrimaryLanguage(e.target.value)}><option>English</option><option>Tamil</option><option>Hindi</option></select></label><label>Company name disclosure<select value={companyDisclosure} onChange={e => setCompanyDisclosure(e.target.value)}><option value="if_asked">Reveal only if candidate asks</option><option value="always">Always reveal</option><option value="never">Do not reveal</option></select></label></div><label>Job description / requirement<textarea value={jdText} onChange={e => setJdText(e.target.value)} placeholder="Paste the requirement here." rows="3" /></label><label>Screening questions <span>One question per line</span><textarea value={questionText} onChange={e => setQuestionText(e.target.value)} placeholder="What is your relevant experience?\nWhy are you considering a job change?" rows="3" /></label><div className="candidate-entry"><div className="candidate-entry-heading"><div><b>Add contacts</b><small>Use a CSV or add one contact manually.</small></div><button type="button" className="outline-button" onClick={addCampaignContact}>＋ Add contact</button></div><div className="form-grid"><label>Full name<input value={candidateName} onChange={e => setCandidateName(e.target.value)} placeholder="Contact name" /></label><label>Mobile number<input value={candidatePhone} onChange={e => setCandidatePhone(e.target.value)} placeholder="+91 98765 43210" /></label></div><label className="file-label">Upload CSV<input type="file" accept=".csv,text/csv" onChange={readCandidateCsv} /><small>{candidateCsv.length ? candidateCsv.length + ' contact(s) ready to import' : 'Required columns: full_name, mobile_number'}</small></label>{campaignContacts.length > 0 && <button type="button" className="text-button" onClick={() => setShowContactList(current => !current)}>{showContactList ? 'Hide contact list' : 'View contact list (' + campaignContacts.length + ')'}</button>}{showContactList && <div className="contact-list">{campaignContacts.map((contact, index) => <div className="contact-list-row" key={contact.id || index}><input value={contact.full_name} onChange={e => updateCampaignContact(index, 'full_name', e.target.value)} onBlur={() => saveCampaignContact(campaignContacts[index])} aria-label="Contact name" /><input value={contact.mobile_number} onChange={e => updateCampaignContact(index, 'mobile_number', e.target.value)} onBlur={() => saveCampaignContact(campaignContacts[index])} aria-label="Mobile number" /><span className="contact-status">{contact.status?.replaceAll('_', ' ')}</span><button type="button" className="small-call-button" onClick={() => deleteCampaignContact(contact, index)}>Delete</button></div>)}</div>}</div><div className="modal-actions"><button type="button" className="outline-button" onClick={() => setShowCampaign(false)}>Cancel</button><button className="primary-button" type="submit">Save campaign <span>→</span></button></div></form></div></div>}
+      {formCampaign && <CampaignForm campaign={formCampaign} notify={notify} onClose={closeForm} onSaved={(message) => { setFormCampaign(null); notify(message); reload() }} />}
+      {reportCampaign && <CampaignReport campaign={reportCampaign} data={data} actions={actions} onClose={() => setReportCampaign(null)} />}
+      {drawerContact && <ContactDrawer key={drawerContact.id} contact={drawerContact} notify={notify} onClose={() => setDrawerContact(null)} onCall={actions.callContact} onChanged={reload} />}
+      {addingContact && <AddContactModal campaigns={data.campaigns} notify={notify} onClose={() => setAddingContact(false)} onSaved={(message) => { setAddingContact(false); notify(message); reload() }} />}
+      {confirmDialog}
+      <Toast toast={toast} onClose={closeToast} />
     </div>
   )
 }
 
-function SettingsPage({ session }) {
-  const [provider, setProvider] = useState('plivo_sarvam')
-  const [phoneNumber, setPhoneNumber] = useState('')
-  const [plivoReady, setPlivoReady] = useState(false)
-  const [sarvamReady, setSarvamReady] = useState(true)
-  const [message, setMessage] = useState('')
-  useEffect(() => {
-    if (!supabase || !session?.user?.id) return
-    supabase.from('workspace_settings').select('telephony_provider, phone_number, plivo_ready, sarvam_ready').eq('user_id', session.user.id).maybeSingle().then(({ data }) => {
-      if (!data) return
-      setProvider(data.telephony_provider || 'plivo_sarvam')
-      setPhoneNumber(data.phone_number || '')
-      setPlivoReady(Boolean(data.plivo_ready))
-      setSarvamReady(Boolean(data.sarvam_ready))
-    })
-  }, [session])
-  const saveSettings = async (event) => {
-    event.preventDefault()
-    const { error } = await supabase.from('workspace_settings').upsert({ user_id: session.user.id, telephony_provider: provider, phone_number: phoneNumber.trim() || null, plivo_ready: plivoReady, sarvam_ready: sarvamReady }, { onConflict: 'user_id' })
-    setMessage(error ? `Could not save settings: ${error.message}` : 'Calling settings saved for this workspace.')
-  }
-  return <div className="settings-page"><div className="settings-intro"><p className="eyebrow">WORKSPACE SETTINGS</p><h2>Calling &amp; AI integrations</h2><p className="muted">Choose how this workspace places calls. Each future SaaS customer can use its own preferred provider.</p></div><form onSubmit={saveSettings}><div className="settings-grid"><label className={`provider-card ${provider === 'plivo_sarvam' ? 'selected' : ''}`}><input type="radio" name="provider" checked={provider === 'plivo_sarvam'} onChange={() => setProvider('plivo_sarvam')} /><div><b>Plivo + Sarvam</b><span>Use Plivo for Indian telephony and Sarvam for multilingual AI conversations.</span><small className={plivoReady ? 'connected-text' : ''}>{plivoReady ? '● Connected' : '○ Needs connection'}</small></div></label><label className={`provider-card ${provider === 'sarvam_voice_agents' ? 'selected' : ''}`}><input type="radio" name="provider" checked={provider === 'sarvam_voice_agents'} onChange={() => setProvider('sarvam_voice_agents')} /><div><b>Sarvam Voice Agents</b><span>Use Sarvam for telephony, outbound campaigns and the complete voice-agent stack.</span><small className={sarvamReady ? 'connected-text' : ''}>{sarvamReady ? '● Ready to configure' : '○ Needs connection'}</small></div></label></div><div className="settings-panel"><div className="settings-panel-heading"><div><h3>Workspace calling number</h3><p className="muted">The number candidates will see for outbound calls.</p></div><span className="secure-note">🔒 Secrets stay server-side</span></div><label>Phone number<input value={phoneNumber} onChange={event => setPhoneNumber(event.target.value)} placeholder="+91 80 3170 7356" /></label><div className="settings-status-row"><label className="checkbox-label"><input type="checkbox" checked={plivoReady} onChange={event => setPlivoReady(event.target.checked)} /> Plivo connection configured</label><label className="checkbox-label"><input type="checkbox" checked={sarvamReady} onChange={event => setSarvamReady(event.target.checked)} /> Sarvam connection configured</label></div><p className="settings-help">API keys are managed securely by the Kural AI backend. They are never displayed or stored in this browser.</p><div className="settings-actions"><button className="primary-button" type="submit">Save integration settings <span>→</span></button>{message && <span className="settings-message">{message}</span>}</div></div></form></div>
-}
-function Metric({ label, value, detail, icon, accent, progress }) { return <div className="metric-card"><div className={`metric-icon ${accent}`}>{icon}</div><div className="metric-copy"><span>{label}</span><strong>{value}</strong><small className={accent === 'red' ? 'red-text' : ''}>{detail}</small></div>{progress && <div className="mini-progress"><div style={{ width: `${progress}%` }} /></div>}</div> }
-function LanguageBadge({ language }) { return <span className="language-badge">{language || 'English'}</span> }
-function CampaignCard({ campaign }) { const pct = campaign.candidates ? Math.round(campaign.completed / campaign.candidates * 100) : 0; return <div className="campaign-card"><div className="campaign-top"><div className={`campaign-icon ${campaign.tone}`}>⌁</div><span className={`status-pill ${campaign.status === 'Active' ? 'active' : 'completed'}`}><i />{campaign.status}</span></div><div className="campaign-title-row"><h3>{campaign.name}</h3><LanguageBadge language={campaign.primary_language} /></div><p className="muted">{campaign.location}</p><div className="campaign-stats"><div><b>{campaign.candidates}</b><span>Contacts</span></div><div><b>{campaign.completed}</b><span>Screened</span></div><div><b>{campaign.review}</b><span>Review</span></div></div><div className="card-progress"><div className="progress-track"><div style={{ width: `${pct}%` }} /></div><span>{pct}% complete</span><span className="campaign-minutes">◷ {campaign.minutes}</span></div></div> }
-function Status({ label }) { const cls = label.toLowerCase().replaceAll(' ', '-'); return <span className={`result-status ${cls}`}><i />{label}</span> }
-function campaignStatusLabel(status) { return ({ created: 'Created', draft: 'Created', ready: 'Created', active: 'Created', in_progress: 'In progress', completed: 'Completed', error: 'Error', paused: 'Paused' })[status] || 'Created' }
-function DataPage({ active, campaignList, onNewCampaign, onEditCampaign, onDuplicateCampaign }) {
-  const [rows, setRows] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [callMessage, setCallMessage] = useState('')
-  const [showContact, setShowContact] = useState(false)
-  const [contactName, setContactName] = useState('')
-  const [contactPhone, setContactPhone] = useState('')
-  const [contactCampaign, setContactCampaign] = useState('')
-  const [campaignOptions, setCampaignOptions] = useState([])
-  const [reportCampaign, setReportCampaign] = useState(null)
-  const [reportRows, setReportRows] = useState([])
+function App() {
+  const [session, setSession] = useState(null)
+  const [loading, setLoading] = useState(isSupabaseConfigured)
+
   useEffect(() => {
     if (!supabase) return
-    const table = active === 'Contacts' ? 'candidates' : active === 'Campaigns' ? 'campaigns' : 'usage_events'
-    const query = active === 'Contacts'
-      ? supabase.from(table).select('id, full_name, mobile_number, status, preferred_language, created_at, campaigns(name)').order('created_at', { ascending: false })
-      : supabase.from(table).select('*').order('created_at', { ascending: false })
-    query.then(({ data }) => { setRows(data || []); setLoading(false) })
-  }, [active])
-  useEffect(() => {
-    if (!supabase || active !== 'Contacts') return
-    supabase.from('campaigns').select('id, name, primary_language').order('name').then(({ data }) => setCampaignOptions(data || []))
-  }, [active])
-  const openReport = async (campaign) => {
-    const { data, error } = await supabase.from('candidates').select('id, full_name, mobile_number, status, calls(id, status, duration_seconds, failure_reason, created_at)').eq('campaign_id', campaign.id).order('created_at', { ascending: false })
-    if (error) { setCallMessage(`Report could not be loaded: ${error.message}`); return }
-    setReportCampaign(campaign)
-    setReportRows(data || [])
-  }
+    supabase.auth.getSession().then(({ data }) => { setSession(data.session); setLoading(false) })
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, next) => setSession(next))
+    return () => listener.subscription.unsubscribe()
+  }, [])
 
-  const startTestCall = async (candidate) => {
-    if (!window.confirm(`This will place a real test call to ${candidate.full_name} at ${candidate.mobile_number}. Continue?`)) return
-    setCallMessage(`Starting call to ${candidate.full_name}…`)
-    const { error } = await supabase.functions.invoke('start-call', { body: { to_number: candidate.mobile_number, candidate_id: candidate.id } })
-    setCallMessage(error ? `Call could not be started: ${error.message}` : `Call started to ${candidate.full_name}.`)
+  if (!isSupabaseConfigured) {
+    return <div className="center-screen"><div className="card error-card"><Icon name="alert" size={22} /><div><b>Supabase isn’t set up</b><p className="muted">Add VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY to the .env.local file, then restart the app.</p></div></div></div>
   }
-  const startCampaign = async (campaign) => {
-    const warning = campaign.status === 'completed'
-      ? 'This campaign is already completed. Completed contacts will be skipped, and only new or not-yet-contacted contacts will be called. Start it again?'
-      : `Start calling all ready contacts in “${campaign.name}”?`
-    if (!window.confirm(warning)) return
-    setCallMessage(`Starting campaign “${campaign.name}”…`)
-    const { data, error } = await supabase.functions.invoke('start-campaign', { body: { campaign_id: campaign.id } })
-    if (error) { setCallMessage(`Campaign could not be started: ${error.message}`); return }
-    setRows(current => current.map(item => item.id === campaign.id ? { ...item, status: data?.ok ? 'in_progress' : item.status } : item))
-    setCallMessage(data?.message || 'Campaign started.')
-  }
-  const addContact = async (event) => {
-    event.preventDefault()
-    const { data, error } = await supabase.from('candidates').insert({ full_name: contactName.trim(), mobile_number: contactPhone.trim(), campaign_id: contactCampaign || null }).select('id, full_name, mobile_number, status, preferred_language, created_at, campaigns(name)').single()
-    if (error) {
-      setCallMessage(`Contact could not be saved: ${error.message}`)
-      return
-    }
-    setRows(current => [data, ...current])
-    setShowContact(false)
-    setContactName('')
-    setContactPhone('')
-    setContactCampaign('')
-    setCallMessage(`Contact added for ${data.full_name}.`)
-  }
-  const duplicateFromRow = async (row) => {
-    const copyContacts = window.confirm(`Copy the contacts from “${row.name}” into the duplicate? Click Cancel to duplicate campaign settings only.`)
-    const copy = await onDuplicateCampaign(row, copyContacts)
-    if (copy) setRows(current => [{ ...copy }, ...current])
-  }
-  const title = active === 'Contacts' ? 'Contacts' : active === 'Campaigns' ? 'Campaigns' : 'Usage report'
-  const description = active === 'Contacts' ? 'Review every candidate imported into your campaigns.' : active === 'Campaigns' ? 'Create and manage your screening campaigns.' : 'Track calling minutes and estimated costs as the agent goes live.'
-  return <div className="data-page"><div className="data-page-heading"><div><p className="eyebrow">WORKSPACE DATA</p><h2>{title}</h2><p className="muted">{description}</p></div>{active === 'Campaigns' && <button className="primary-button" onClick={onNewCampaign}>＋ New campaign</button>}{active === 'Contacts' && <button className="primary-button" onClick={() => setShowContact(true)}>＋ New contact</button>}</div>{callMessage && <div className="call-message">{callMessage}</div>}<div className="panel data-panel">{loading ? <div className="empty-state">Loading your {title.toLowerCase()}…</div> : active === 'Contacts' ? <table className="data-table"><thead><tr><th>NAME</th><th>MOBILE</th><th>CAMPAIGN</th><th>STATUS</th><th>LANGUAGE</th><th>ACTION</th></tr></thead><tbody>{rows.length ? rows.map(row => <tr key={row.id}><td><b>{row.full_name}</b></td><td>{row.mobile_number}</td><td>{row.campaigns?.name || 'Individual call'}</td><td><Status label={row.status.replaceAll('_', ' ')} /></td><td>{row.preferred_language || 'Not selected'}</td><td><button className="small-call-button" onClick={() => startTestCall(row)}>Test call</button></td></tr>) : <tr><td colSpan="6"><div className="empty-state">No contacts yet. Add a contact to place an individual call.</div></td></tr>}</tbody></table> : active === 'Campaigns' ? <table className="data-table"><thead><tr><th>CAMPAIGN</th><th>STATUS</th><th>CREATED</th><th>ACTION</th></tr></thead><tbody>{rows.length ? rows.map(row => <tr key={row.id}><td><b>{row.name}</b></td><td><span className={`campaign-status ${row.status}`}><i />{campaignStatusLabel(row.status)}</span></td><td>{new Date(row.created_at).toLocaleDateString()}</td><td><button className="small-call-button" onClick={() => startCampaign(row)} disabled={row.status === 'in_progress'}>Start campaign</button><button className="small-call-button" onClick={() => openReport(row)}>Report</button><button className="small-call-button" onClick={() => duplicateFromRow(row)}>Duplicate</button><button className="small-call-button" onClick={() => onEditCampaign(row)}>Edit</button></td></tr>) : <tr><td colSpan="4"><div className="empty-state">No campaigns yet.</div></td></tr>}</tbody></table> : <div className="usage-report-grid"><div className="report-number"><span>Total minutes</span><strong>0</strong><small>Call usage will appear here after telephony is connected.</small></div><div className="report-number"><span>Estimated cost</span><strong>₹0</strong><small>Provider charges will be recorded automatically.</small></div><div className="report-number"><span>Events recorded</span><strong>{rows.length}</strong><small>Usage events from your connected providers.</small></div></div>}</div>{showContact && <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && setShowContact(false)}><div className="modal" role="dialog" aria-modal="true" aria-labelledby="contact-title"><button className="modal-close" onClick={() => setShowContact(false)}>×</button><div className="modal-kicker">INDIVIDUAL CONTACT</div><h2 id="contact-title">Add a new contact</h2><p className="muted">Add a person for an individual outbound call. Campaign assignment is optional.</p><form onSubmit={addContact}><label>Full name<input autoFocus value={contactName} onChange={event => setContactName(event.target.value)} placeholder="Candidate name" required /></label><label>Mobile number<input value={contactPhone} onChange={event => setContactPhone(event.target.value)} placeholder="+91 98765 43210" required /></label><label>Assign to campaign <span>Optional</span><select value={contactCampaign} onChange={event => setContactCampaign(event.target.value)}><option value="">Individual call — no campaign</option>{campaignOptions.map(campaign => <option key={campaign.id} value={campaign.id}>{campaign.name}</option>)}</select></label><div className="modal-actions"><button type="button" className="outline-button" onClick={() => setShowContact(false)}>Cancel</button><button className="primary-button" type="submit">Add contact <span>→</span></button></div></form></div></div>}{reportCampaign && <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && setReportCampaign(null)}><div className="modal report-modal" role="dialog" aria-modal="true" aria-labelledby="report-title"><button className="modal-close" onClick={() => setReportCampaign(null)}>×</button><div className="modal-kicker">CAMPAIGN REPORT</div><h2 id="report-title">{reportCampaign.name}</h2><p className="muted">Call progress and retry actions for this campaign.</p><div className="report-summary"><span><b>{reportRows.length}</b> contacts</span><span><b>{reportRows.filter(row => ['completed', 'shortlisted', 'rejected', 'under_review'].includes(row.status)).length}</b> completed</span><span><b>{reportRows.filter(row => row.status === 'failed').length}</b> failed</span></div><div className="report-list">{reportRows.length ? reportRows.map(row => { const lastCall = row.calls?.[0]; return <div className="report-row" key={row.id}><div><b>{row.full_name}</b><small>{row.mobile_number}</small></div><span className={`report-status ${row.status}`}>{row.status.replaceAll('_', ' ')}</span>{row.status === 'failed' && <button className="small-call-button" title="Retry this contact" onClick={() => startTestCall(row)}>☎ Retry call</button>}<small>{lastCall?.failure_reason || (lastCall?.status === 'failed' ? 'Provider reported call failure' : '')}</small></div> }) : <div className="empty-state">No contacts in this campaign yet.</div>}</div></div></div>}</div>
+  if (loading) return <div className="center-screen"><div className="spinner" /><p className="muted">Opening your workspace…</p></div>
+  if (!session) return <Login />
+  return <Workspace session={session} />
 }
-function LoginScreen({ email, setEmail, password, setPassword, error, onSubmit }) { return <main className="login-page"><div className="login-card"><div className="brand login-brand"><div className="brand-mark">K</div><div><div className="brand-name">Kural AI</div><div className="brand-sub">AI screening studio</div></div></div><div className="login-kicker">PRIVATE WORKSPACE</div><h1>Welcome back</h1><p className="muted">Sign in to manage your candidate screening campaigns.</p><form onSubmit={onSubmit} className="login-form"><label>Email address<input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@company.com" required /></label><label>Password<input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Your password" required /></label>{error && <div className="login-error">{error}</div>}<button className="primary-button" type="submit">Sign in <span>→</span></button></form><p className="login-note">Your account is managed through Supabase Auth.</p></div></main> }
 
 createRoot(document.getElementById('root')).render(<StrictMode><App /></StrictMode>)

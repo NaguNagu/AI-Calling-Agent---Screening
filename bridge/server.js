@@ -120,6 +120,8 @@ class ScreeningSession {
     this.index = 0
     this.answers = []
     this.busy = false
+    // The first thing the candidate says is the reply to "May I speak with…?", not an answer.
+    this.confirmed = false
   }
 
   async sendAudio(text) {
@@ -133,8 +135,8 @@ class ScreeningSession {
       : this.language === 'Hindi'
         ? `नमस्ते, नौकरी की प्रारंभिक स्क्रीनिंग के लिए ${this.metadata.callerName || 'Kural AI'} से कॉल कर रहे हैं। क्या मैं ${this.metadata.candidateName || 'आपसे'} बात कर सकता हूँ?`
         : `Hello, this is ${this.metadata.callerName || 'Kural AI'} calling for a job screening. May I speak with ${this.metadata.candidateName || 'you'}?`
+    // Only greet here. The first question is asked after the candidate replies.
     await this.sendAudio(intro)
-    await this.sendAudio(this.questions[0].question_text)
   }
 
   async handleTranscript(transcript) {
@@ -142,6 +144,11 @@ class ScreeningSession {
     if (!text || this.busy) return
     this.busy = true
     try {
+      if (!this.confirmed) {
+        this.confirmed = true
+        await this.sendAudio(this.questions[0].question_text)
+        return
+      }
       this.answers.push({ question: this.questions[this.index], answer: text })
       this.index += 1
       if (this.index >= this.questions.length) {

@@ -3,3 +3,6 @@ dist/
 .env
 .env.*
 !.env.example
+# Supabase CLI cache (contains the database connection address)
+supabase/.temp/
+.DS_Store
